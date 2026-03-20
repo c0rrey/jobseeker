@@ -22,6 +22,16 @@ function parseSkills(raw: string | null): string[] {
     if (Array.isArray(parsed)) {
       return parsed.filter((s): s is string => typeof s === "string");
     }
+    if (
+      parsed !== null &&
+      typeof parsed === "object" &&
+      "skills" in parsed &&
+      Array.isArray((parsed as { skills: unknown }).skills)
+    ) {
+      return (parsed as { skills: unknown[] }).skills.filter(
+        (s): s is string => typeof s === "string"
+      );
+    }
   } catch {
     // not valid JSON
   }
