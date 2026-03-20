@@ -4,3 +4,13 @@
 
 # crumb session artifacts (ephemeral — not committed)
 .crumbs/sessions/
+
+# OS files
+.DS_Store
+
+# Python
+__pycache__/
+*.pyc
+
+# Data files
+data/
