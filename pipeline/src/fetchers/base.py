@@ -12,6 +12,16 @@ from typing import Any
 class BaseFetcher(ABC):
     """Interface that all job fetchers must implement."""
 
+    @property
+    @abstractmethod
+    def source_type(self) -> str:
+        """
+        Return the source type for jobs fetched by this fetcher.
+
+        Returns:
+            One of: 'api', 'career_page', 'ats_feed'.
+        """
+
     @abstractmethod
     def fetch(self) -> list[dict[str, Any]]:
         """

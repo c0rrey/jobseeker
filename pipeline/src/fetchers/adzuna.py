@@ -13,13 +13,18 @@ from typing import Optional
 
 import requests
 
-from config.settings import get_adzuna_credentials, load_profile
+from pipeline.config.settings import get_adzuna_credentials, load_profile
 
 from .base import BaseFetcher
 
 
 class AdzunaFetcher(BaseFetcher):
     """Fetches jobs from the Adzuna API."""
+
+    @property
+    def source_type(self) -> str:
+        """Return 'api' — Adzuna is fetched via REST API."""
+        return "api"
 
     def __init__(
         self,

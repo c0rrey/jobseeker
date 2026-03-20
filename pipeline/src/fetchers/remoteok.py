@@ -12,13 +12,18 @@ from typing import Optional
 
 import requests
 
-from config.settings import load_profile
+from pipeline.config.settings import load_profile
 
 from .base import BaseFetcher
 
 
 class RemoteOKFetcher(BaseFetcher):
     """Fetches jobs from the RemoteOK API."""
+
+    @property
+    def source_type(self) -> str:
+        """Return 'api' — RemoteOK is fetched via public JSON API."""
+        return "api"
 
     def __init__(self):
         """Initialize RemoteOK fetcher."""
