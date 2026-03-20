@@ -5,6 +5,12 @@ Fetches compensation data for a company from the unofficial levels.fyi
 public API and stores the result as a JSON blob in
 ``companies.crunchbase_data``.
 
+NOTE: Despite the column name, ``crunchbase_data`` stores levels.fyi
+compensation data here — NOT Crunchbase API data.  The column was originally
+created for Crunchbase enrichment and is reused by this module to avoid a
+schema migration.  A dedicated ``levelsfy_data`` column would be cleaner but
+requires a DB migration that has not yet been scheduled.
+
 The levels.fyi endpoint is unauthenticated and public, but rate-limited.
 No API key is required. If the request fails the module logs a warning and
 returns False immediately without raising.
@@ -72,7 +78,8 @@ def _parse_comp_data(raw: dict[str, Any], company_name: str) -> dict[str, Any]:
         company_name: Included in the stored blob for traceability.
 
     Returns:
-        Dict suitable for JSON serialisation into ``crunchbase_data``.
+        Dict suitable for JSON serialisation into ``companies.crunchbase_data``
+        (reused for levels.fyi data — NOT Crunchbase data; see module docstring).
     """
     return {
         "source": "levels.fyi",
@@ -112,6 +119,10 @@ def enrich(company_name: str, db_connection: sqlite3.Connection) -> bool:
     Queries levels.fyi for ``company_name`` and serialises the compensation
     summary as JSON into ``companies.crunchbase_data``.
 
+    NOTE: ``crunchbase_data`` stores levels.fyi data here — NOT Crunchbase
+    data.  The column is reused to avoid a schema migration; see module
+    docstring for context.
+
     Args:
         company_name: The company display name to look up on levels.fyi.
         db_connection: Open SQLite connection to the V2 pipeline database.
@@ -127,6 +138,11 @@ def enrich(company_name: str, db_connection: sqlite3.Connection) -> bool:
 
     try:
         comp_summary = _parse_comp_data(raw, company_name)
+        # IMPORTANT: This writes levels.fyi compensation data into the
+        # ``crunchbase_data`` column — NOT Crunchbase API data.  The column is
+        # reused here to avoid a DB schema migration.  See module docstring for
+        # full context.  When a migration is scheduled, rename this column to
+        # ``levelsfy_data`` (or a shared ``enrichment_data`` column).
         fields = {"crunchbase_data": json.dumps(comp_summary)}
         _update_company(db_connection, company_name, fields)
     except Exception as exc:  # noqa: BLE001
