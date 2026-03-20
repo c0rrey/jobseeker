@@ -251,8 +251,9 @@ def run_enrichment(db_connection: sqlite3.Connection) -> EnrichmentSummary:
 
     companies = _query_companies_needing_enrichment(db_connection)
     logger.info(
-        "Enrichment run started: %d company/companies need enrichment.",
+        "Enrichment run started: %d %s need enrichment.",
         len(companies),
+        "company" if len(companies) == 1 else "companies",
     )
 
     for company_id, company_name in companies:
@@ -283,9 +284,9 @@ def run_enrichment(db_connection: sqlite3.Connection) -> EnrichmentSummary:
         "sources_failed": failed,
     }
     logger.info(
-        "Enrichment run complete. Processed %d company/companies. "
-        "Succeeded: %s. Failed: %s.",
+        "Enrichment run complete. Processed %d %s. Succeeded: %s. Failed: %s.",
         summary["companies_processed"],
+        "company" if summary["companies_processed"] == 1 else "companies",
         summary["sources_succeeded"],
         summary["sources_failed"],
     )
