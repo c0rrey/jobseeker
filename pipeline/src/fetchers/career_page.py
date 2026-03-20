@@ -89,7 +89,15 @@ class CareerPageFetcher(BaseFetcher):
             url: str = config["url"]
             last_crawled_at: Optional[str] = config["last_crawled_at"]
             strategy_json: Optional[str] = config["scrape_strategy"]
-            company_name: str = config["company_name"]
+            raw_company_name: Optional[str] = config["company_name"]
+
+            if raw_company_name is None:
+                logger.warning(
+                    "CareerPageFetcher: config %d has no matching company row "
+                    "(orphaned company_id) — crawling with empty company name",
+                    config_id,
+                )
+            company_name: str = raw_company_name or ""
 
             if not strategy_json:
                 logger.warning(
@@ -157,7 +165,7 @@ class CareerPageFetcher(BaseFetcher):
             SELECT cpc.id, cpc.url, cpc.scrape_strategy, cpc.last_crawled_at,
                    c.name AS company_name
             FROM career_page_configs cpc
-            JOIN companies c ON c.id = cpc.company_id
+            LEFT JOIN companies c ON c.id = cpc.company_id
             WHERE cpc.status = 'active'
         """
         try:
