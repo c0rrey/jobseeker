@@ -12,7 +12,7 @@ import path from "path";
 // Resolve the database path relative to this file's location (__dirname = web/lib/).
 // Navigate two levels up to reach the monorepo root where data/ lives.
 // Respects DB_PATH env var so developers can override the path at startup.
-const DB_PATH = process.env.DB_PATH ?? path.resolve(__dirname, "../../data/jobs.db");
+const DB_PATH = process.env.DB_PATH || path.resolve(__dirname, "../../data/jobs.db");
 
 let db: Database.Database | null = null;
 
