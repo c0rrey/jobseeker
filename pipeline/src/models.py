@@ -9,6 +9,7 @@ CareerPageConfig, and ProfileSuggestion dataclasses matching the V2
 SQLite schema exactly.
 """
 
+import json
 from dataclasses import dataclass, field
 from typing import Optional
 
@@ -39,9 +40,9 @@ class Job:
     title: str
     company: str
     url: str
-    description: str
     source: str  # e.g. "adzuna", "remoteok", "career_page"
     source_type: str  # e.g. "api", "career_page", "ats_feed"
+    description: Optional[str] = None
 
     # --- Optional location / compensation ---
     location: Optional[str] = None
@@ -70,7 +71,12 @@ class Job:
     external_id: Optional[str] = None         # source-specific job ID
 
     # --- Raw data (debugging / LLM context) ---
-    raw: Optional[dict] = field(default=None, repr=False)
+    raw_json: Optional[str] = field(default=None, repr=False)
+
+    @property
+    def raw(self) -> Optional[dict]:
+        """Backward-compatible dict view of raw_json; returns None when raw_json is None."""
+        return json.loads(self.raw_json) if self.raw_json else None
 
 
 # ---------------------------------------------------------------------------

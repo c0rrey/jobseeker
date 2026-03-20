@@ -12,6 +12,7 @@ Covers:
 """
 
 import dataclasses
+import json
 from typing import Optional, get_args, get_origin, Union
 
 import pytest
@@ -93,7 +94,7 @@ V1_OPTIONAL_FIELDS = [
     "match_score",
     "match_reasoning",
     "db_id",
-    "raw",
+    "raw_json",
 ]
 
 
@@ -151,9 +152,63 @@ class TestJobV1Fields:
             description="A job.",
             source="adzuna",
             source_type="api",
-            raw={"key": "value"},
+            raw_json=json.dumps({"key": "value"}),
         )
-        assert "raw" not in repr(job)
+        assert "raw_json" not in repr(job)
+
+    # --- seek-28: raw_json field / raw property ---
+
+    def test_raw_json_field_in_asdict(self):
+        """dataclasses.asdict produces raw_json key, not raw (seek-28 AC)."""
+        job = Job(
+            title="SWE",
+            company="Acme",
+            url="https://example.com/job/raw1",
+            source="adzuna",
+            source_type="api",
+            raw_json=json.dumps({"k": "v"}),
+        )
+        d = dataclasses.asdict(job)
+        assert "raw_json" in d
+        assert "raw" not in d
+
+    def test_raw_property_returns_dict(self):
+        """raw property deserialises raw_json and returns a dict (seek-28 AC)."""
+        payload = {"title": "SWE", "level": 5}
+        job = Job(
+            title="SWE",
+            company="Acme",
+            url="https://example.com/job/raw2",
+            source="adzuna",
+            source_type="api",
+            raw_json=json.dumps(payload),
+        )
+        assert job.raw == payload
+
+    def test_raw_property_none_when_raw_json_none(self):
+        """raw property returns None when raw_json is None (seek-28 AC)."""
+        job = Job(
+            title="SWE",
+            company="Acme",
+            url="https://example.com/job/raw3",
+            source="adzuna",
+            source_type="api",
+        )
+        assert job.raw_json is None
+        assert job.raw is None
+
+    # --- seek-29: description optional ---
+
+    def test_description_optional(self):
+        """Job constructs successfully without description; defaults to None (seek-29 AC)."""
+        job = Job(
+            title="SWE",
+            company="Acme",
+            url="https://example.com/job/nodesc",
+            source="adzuna",
+            source_type="api",
+        )
+        assert job.description is None
 
 
 # ---------------------------------------------------------------------------
