@@ -107,7 +107,7 @@ def _parse_properties(props: dict[str, Any]) -> dict[str, Any]:
     size_range = _EMPLOYEE_ENUM_MAP.get(size_enum, "")
 
     # Categories is a list of category objects; take the first category name.
-    categories = props.get("categories", {}).get("entities", [])
+    categories = (props.get("categories") or {}).get("entities", [])
     industry = categories[0].get("properties", {}).get("name", "") if categories else ""
 
     funding_stage = props.get("last_funding_type", "") or ""
