@@ -39,7 +39,7 @@ interface JobTableProps {
   feedbackStatus: FeedbackFilter;
 }
 
-const SOURCES = ["adzuna", "remoteok", "linkedin", "career_page", "ats_feed"] as const;
+const SOURCES = ["adzuna", "remoteok", "linkedin", "career_page", "greenhouse", "lever", "ashby"] as const;
 
 const FEEDBACK_OPTIONS: { value: FeedbackFilter; label: string }[] = [
   { value: "all", label: "All feedback" },
