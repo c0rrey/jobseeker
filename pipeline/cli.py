@@ -330,11 +330,11 @@ def main(argv: list[str] | None = None) -> int:
 
     db_path = args.db if args.db is not None else get_db_path()
 
-    # Initialise the database (idempotent — creates tables if not exists).
-    logger.info("Initialising database at %s", db_path)
-    init_db(db_path)
-
     try:
+        # Initialise the database (idempotent — creates tables if not exists).
+        logger.info("Initialising database at %s", db_path)
+        init_db(db_path)
+
         if args.fetch:
             summary = run_fetch(db_path)
             _print_fetch_summary(summary)

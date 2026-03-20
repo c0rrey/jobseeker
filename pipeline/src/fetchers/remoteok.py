@@ -80,7 +80,7 @@ class RemoteOKFetcher(BaseFetcher):
             
             return filtered_jobs
             
-        except requests.RequestException as e:
+        except (requests.RequestException, ValueError) as e:
             logger.error("Error fetching from RemoteOK: %s", e)
             return []
 

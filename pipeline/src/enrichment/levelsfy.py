@@ -58,7 +58,7 @@ def _fetch_levelsfy(company_name: str) -> dict[str, Any] | None:
             "Levels.fyi enrichment unavailable for '%s': HTTP %s", company_name, status
         )
         return None
-    except requests.RequestException as exc:
+    except (requests.RequestException, ValueError) as exc:
         logger.warning(
             "Levels.fyi enrichment unavailable for '%s': %s", company_name, exc
         )
