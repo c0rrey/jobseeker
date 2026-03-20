@@ -92,8 +92,9 @@ Each object in the array has these fields:
   - `industry`: industry classification — may be null
   - `funding_stage`: funding stage (e.g., "Series B", "Public") — may be null
   - `glassdoor_rating`: numeric rating 1.0–5.0 — may be null
+  - `glassdoor_url`: URL to the company's Glassdoor page — may be null
   - `tech_stack`: comma-separated technology stack string — may be null
-  - `crunchbase_data`: JSON string with additional company signals — may be null
+  - `crunchbase_data`: JSON string with company signals; may include Crunchbase fields (`short_description`, `funding_total`, `last_funding_type`, `num_employees_enum`) and a `levelsfy` sub-object with compensation benchmarks (`median_total_comp`, `median_base_salary`, `sample_size`) — may be null
 
 ## Output Format
 

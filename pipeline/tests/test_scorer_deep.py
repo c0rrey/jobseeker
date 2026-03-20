@@ -235,6 +235,7 @@ class TestGetPass1Survivors:
             "description",
             "salary_min",
             "salary_max",
+            "salary_currency",
             "company_id",
         }
 

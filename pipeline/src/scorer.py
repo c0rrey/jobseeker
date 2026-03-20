@@ -32,9 +32,20 @@ Schema reference (database.py L83-98):
 from __future__ import annotations
 
 import hashlib
+import logging
 import math
 import sqlite3
 from typing import Any
+
+logger = logging.getLogger(__name__)
+
+
+def _safe_int(value: Any, default: int = 0) -> int:
+    """Convert *value* to int, returning *default* on TypeError or ValueError."""
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -100,6 +111,10 @@ def get_unscored_jobs(db_connection: sqlite3.Connection) -> list[dict[str, Any]]
         LEFT JOIN score_dimensions sd
             ON sd.job_id = j.id AND sd.pass = :pass
         WHERE sd.id IS NULL
+          AND NOT EXISTS (
+            SELECT 1 FROM score_dimensions sd0
+            WHERE sd0.job_id = j.id AND sd0.pass = 0
+          )
         ORDER BY j.id
         """,
         {"pass": PASS_1},
@@ -241,30 +256,40 @@ def write_pass1_results(
 
     rows_written = 0
     for result in results:
-        job_id: int = result["job_id"]
-        verdict: str = str(result.get("verdict", "no")).lower()
-        confidence: int = int(result.get("confidence", 0))
-        reasoning: str | None = result.get("reasoning")
+        try:
+            if "job_id" not in result:
+                logger.warning("Skipping Pass 1 result missing 'job_id': %r", result)
+                continue
+            job_id: int = result["job_id"]
+            verdict: str = str(result.get("verdict", "no")).lower()
+            confidence: int = _safe_int(result.get("confidence", 0))
+            reasoning: str | None = result.get("reasoning")
 
-        overall: int = 0 if verdict == "no" else confidence
+            overall: int = 0 if verdict == "no" else confidence
 
-        db_connection.execute(
-            """
-            INSERT OR REPLACE INTO score_dimensions
-                (job_id, pass, overall, reasoning, profile_hash, scored_at)
-            VALUES
-                (:job_id, :pass, :overall, :reasoning, :profile_hash,
-                 datetime('now'))
-            """,
-            {
-                "job_id": job_id,
-                "pass": PASS_1,
-                "overall": overall,
-                "reasoning": reasoning,
-                "profile_hash": profile_hash or None,
-            },
-        )
-        rows_written += 1
+            db_connection.execute(
+                """
+                INSERT OR REPLACE INTO score_dimensions
+                    (job_id, pass, overall, reasoning, profile_hash, scored_at)
+                VALUES
+                    (:job_id, :pass, :overall, :reasoning, :profile_hash,
+                     datetime('now'))
+                """,
+                {
+                    "job_id": job_id,
+                    "pass": PASS_1,
+                    "overall": overall,
+                    "reasoning": reasoning,
+                    "profile_hash": profile_hash or None,
+                },
+            )
+            rows_written += 1
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "Skipping malformed Pass 1 result job_id=%r: %s",
+                result.get("job_id"),
+                exc,
+            )
 
     return rows_written
 
@@ -298,9 +323,10 @@ def get_pass1_survivors(
 
     Returns:
         List of dicts with keys: id, title, company, location, description,
-        salary_min, salary_max, company_id.  The extended set of keys
-        (compared to Pass 1 queries) allows the deep-scorer prompt to access
-        compensation data and company enrichment via the company_id FK.
+        salary_min, salary_max, salary_currency, company_id.  The extended
+        set of keys (compared to Pass 1 queries) allows the deep-scorer
+        prompt to access compensation data and company enrichment via the
+        company_id FK.
         Empty list when no jobs require Pass 2 scoring.
     """
     cursor = db_connection.execute(
@@ -313,6 +339,7 @@ def get_pass1_survivors(
             j.description,
             j.salary_min,
             j.salary_max,
+            j.salary_currency,
             j.company_id
         FROM jobs j
         INNER JOIN score_dimensions sd1
@@ -385,39 +412,49 @@ def write_pass2_results(
 
     rows_written = 0
     for result in results:
-        job_id: int = result["job_id"]
-        role_fit: int = int(result.get("role_fit", 0))
-        skills_gap: int = int(result.get("skills_gap", 0))
-        culture_signals: int = int(result.get("culture_signals", 0))
-        growth_potential: int = int(result.get("growth_potential", 0))
-        comp_alignment: int = int(result.get("comp_alignment", 0))
-        overall: int = int(result.get("overall", 0))
-        reasoning: str | None = result.get("reasoning")
+        try:
+            if "job_id" not in result:
+                logger.warning("Skipping Pass 2 result missing 'job_id': %r", result)
+                continue
+            job_id: int = result["job_id"]
+            role_fit: int = _safe_int(result.get("role_fit", 0))
+            skills_gap: int = _safe_int(result.get("skills_gap", 0))
+            culture_signals: int = _safe_int(result.get("culture_signals", 0))
+            growth_potential: int = _safe_int(result.get("growth_potential", 0))
+            comp_alignment: int = _safe_int(result.get("comp_alignment", 0))
+            overall: int = _safe_int(result.get("overall", 0))
+            reasoning: str | None = result.get("reasoning")
 
-        db_connection.execute(
-            """
-            INSERT OR REPLACE INTO score_dimensions
-                (job_id, pass, role_fit, skills_gap, culture_signals,
-                 growth_potential, comp_alignment, overall, reasoning,
-                 profile_hash, scored_at)
-            VALUES
-                (:job_id, :pass, :role_fit, :skills_gap, :culture_signals,
-                 :growth_potential, :comp_alignment, :overall, :reasoning,
-                 :profile_hash, datetime('now'))
-            """,
-            {
-                "job_id": job_id,
-                "pass": PASS_2,
-                "role_fit": role_fit,
-                "skills_gap": skills_gap,
-                "culture_signals": culture_signals,
-                "growth_potential": growth_potential,
-                "comp_alignment": comp_alignment,
-                "overall": overall,
-                "reasoning": reasoning,
-                "profile_hash": profile_hash or None,
-            },
-        )
-        rows_written += 1
+            db_connection.execute(
+                """
+                INSERT OR REPLACE INTO score_dimensions
+                    (job_id, pass, role_fit, skills_gap, culture_signals,
+                     growth_potential, comp_alignment, overall, reasoning,
+                     profile_hash, scored_at)
+                VALUES
+                    (:job_id, :pass, :role_fit, :skills_gap, :culture_signals,
+                     :growth_potential, :comp_alignment, :overall, :reasoning,
+                     :profile_hash, datetime('now'))
+                """,
+                {
+                    "job_id": job_id,
+                    "pass": PASS_2,
+                    "role_fit": role_fit,
+                    "skills_gap": skills_gap,
+                    "culture_signals": culture_signals,
+                    "growth_potential": growth_potential,
+                    "comp_alignment": comp_alignment,
+                    "overall": overall,
+                    "reasoning": reasoning,
+                    "profile_hash": profile_hash or None,
+                },
+            )
+            rows_written += 1
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "Skipping malformed Pass 2 result job_id=%r: %s",
+                result.get("job_id"),
+                exc,
+            )
 
     return rows_written

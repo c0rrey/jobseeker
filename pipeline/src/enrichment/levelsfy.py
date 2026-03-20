@@ -2,14 +2,9 @@
 Levels.fyi enrichment module.
 
 Fetches compensation data for a company from the unofficial levels.fyi
-public API and stores the result as a JSON blob in
-``companies.crunchbase_data``.
-
-NOTE: Despite the column name, ``crunchbase_data`` stores levels.fyi
-compensation data here — NOT Crunchbase API data.  The column was originally
-created for Crunchbase enrichment and is reused by this module to avoid a
-schema migration.  A dedicated ``levelsfy_data`` column would be cleaner but
-requires a DB migration that has not yet been scheduled.
+public API and merges the result into the ``companies.crunchbase_data``
+JSON column under the ``"levelsfy"`` key, preserving any existing
+Crunchbase signals written by the crunchbase enrichment module.
 
 The levels.fyi endpoint is unauthenticated and public, but rate-limited.
 No API key is required. If the request fails the module logs a warning and
@@ -78,8 +73,8 @@ def _parse_comp_data(raw: dict[str, Any], company_name: str) -> dict[str, Any]:
         company_name: Included in the stored blob for traceability.
 
     Returns:
-        Dict suitable for JSON serialisation into ``companies.crunchbase_data``
-        (reused for levels.fyi data — NOT Crunchbase data; see module docstring).
+        Dict suitable for storage under the ``"levelsfy"`` key of the
+        ``companies.crunchbase_data`` JSON column.
     """
     return {
         "source": "levels.fyi",
@@ -116,12 +111,9 @@ def _update_company(
 def enrich(company_id: int, company_name: str, db_connection: sqlite3.Connection) -> bool:
     """Enrich a company record with levels.fyi compensation data.
 
-    Queries levels.fyi for ``company_name`` and serialises the compensation
-    summary as JSON into ``companies.crunchbase_data``.
-
-    NOTE: ``crunchbase_data`` stores levels.fyi data here — NOT Crunchbase
-    data.  The column is reused to avoid a schema migration; see module
-    docstring for context.
+    Queries levels.fyi for ``company_name`` and merges the compensation
+    summary into the ``companies.crunchbase_data`` JSON column under the
+    ``"levelsfy"`` key, preserving any existing Crunchbase signals.
 
     Args:
         company_id: Primary key of the company row in the companies table.
@@ -139,12 +131,21 @@ def enrich(company_id: int, company_name: str, db_connection: sqlite3.Connection
 
     try:
         comp_summary = _parse_comp_data(raw, company_name)
-        # IMPORTANT: This writes levels.fyi compensation data into the
-        # ``crunchbase_data`` column — NOT Crunchbase API data.  The column is
-        # reused here to avoid a DB schema migration.  See module docstring for
-        # full context.  When a migration is scheduled, rename this column to
-        # ``levelsfy_data`` (or a shared ``enrichment_data`` column).
-        fields = {"crunchbase_data": json.dumps(comp_summary)}
+
+        # Read existing crunchbase_data so we can merge rather than overwrite.
+        existing_row = db_connection.execute(
+            "SELECT crunchbase_data FROM companies WHERE id = ?", (company_id,)
+        ).fetchone()
+        existing_data: dict[str, Any] = {}
+        if existing_row and existing_row[0]:
+            try:
+                existing_data = json.loads(existing_row[0])
+            except (json.JSONDecodeError, TypeError):
+                existing_data = {}
+
+        # Merge levels.fyi data under "levelsfy" key, preserving crunchbase signals.
+        merged = {**existing_data, "levelsfy": comp_summary}
+        fields = {"crunchbase_data": json.dumps(merged)}
         _update_company(db_connection, company_id, fields)
     except Exception as exc:  # noqa: BLE001
         logger.warning(

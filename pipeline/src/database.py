@@ -65,6 +65,7 @@ CREATE TABLE IF NOT EXISTS jobs (
     description TEXT,
     salary_min REAL,
     salary_max REAL,
+    salary_currency TEXT,
     posted_at TEXT,
     fetched_at TEXT NOT NULL DEFAULT (datetime('now')),
     last_seen_at TEXT NOT NULL DEFAULT (datetime('now')),
