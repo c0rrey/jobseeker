@@ -95,13 +95,13 @@ def run_fetch(db_path: str) -> dict[str, Any]:
     """
     conn = get_connection(db_path)
     try:
-        all_raw_jobs: list[Any] = []
+        all_job_pairs: list[Any] = []
 
         # --- API fetchers ---------------------------------------------------
         try:
             adzuna_raw = AdzunaFetcher().fetch()
             logger.info("Adzuna: fetched %d raw jobs", len(adzuna_raw))
-            all_raw_jobs.extend(
+            all_job_pairs.extend(
                 (normalize_adzuna(r), r) for r in adzuna_raw
             )
         except Exception:
@@ -110,7 +110,7 @@ def run_fetch(db_path: str) -> dict[str, Any]:
         try:
             remoteok_raw = RemoteOKFetcher().fetch()
             logger.info("RemoteOK: fetched %d raw jobs", len(remoteok_raw))
-            all_raw_jobs.extend(
+            all_job_pairs.extend(
                 (normalize_remoteok(r), r) for r in remoteok_raw
             )
         except Exception:
@@ -119,7 +119,7 @@ def run_fetch(db_path: str) -> dict[str, Any]:
         try:
             linkedin_raw = LinkedInFetcher().fetch()
             logger.info("LinkedIn: fetched %d raw jobs", len(linkedin_raw))
-            all_raw_jobs.extend(
+            all_job_pairs.extend(
                 (normalize_linkedin(r), r) for r in linkedin_raw
             )
         except Exception:
@@ -133,7 +133,7 @@ def run_fetch(db_path: str) -> dict[str, Any]:
                 platform = r.get("_ats_platform", "")
                 norm_fn = _ATS_NORMALIZERS.get(platform)
                 if norm_fn:
-                    all_raw_jobs.append((norm_fn(r), r))
+                    all_job_pairs.append((norm_fn(r), r))
                 else:
                     logger.warning("ATS: unknown platform '%s', skipping", platform)
         except Exception:
@@ -143,19 +143,19 @@ def run_fetch(db_path: str) -> dict[str, Any]:
         try:
             career_raw = CareerPageFetcher(conn).fetch()
             logger.info("Career pages: fetched %d raw jobs", len(career_raw))
-            all_raw_jobs.extend(
+            all_job_pairs.extend(
                 (normalize_career_page(r), r) for r in career_raw
             )
         except Exception:
             logger.exception("Career page fetch failed")
 
         # --- Dedup and insert -----------------------------------------------
-        jobs = [job for job, _ in all_raw_jobs]
+        jobs = [job for job, _ in all_job_pairs]
         inserted, updated = deduplicate_and_insert(jobs, conn)
         conn.commit()
 
         return {
-            "fetched": len(all_raw_jobs),
+            "fetched": len(all_job_pairs),
             "inserted": inserted,
             "updated": updated,
         }
