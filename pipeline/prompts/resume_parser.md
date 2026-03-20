@@ -92,7 +92,7 @@ After producing the JSON, the pipeline will:
 
 2. **Write to `profile_suggestions`**: For each skill in `skills` that does not
    appear in the existing `profile.yaml`, the pipeline records a suggestion with
-   `suggestion_type = 'add_skill'` and `content` set to the skill name. You do
+   `suggestion_type = 'add_skill'` and `suggested_change` set to the skill name. You do
    not need to generate SQL for this either.
 
 Confirm your output is valid JSON before returning it.
