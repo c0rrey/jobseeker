@@ -69,19 +69,19 @@ class RemoteOKFetcher(BaseFetcher):
             # First item is metadata, skip it
             jobs = data[1:] if len(data) > 1 else []
             
-            logger.info(f"Retrieved {len(jobs)} jobs from RemoteOK")
+            logger.info("Retrieved %d jobs from RemoteOK", len(jobs))
             
             # Filter by relevant keywords locally
             # RemoteOK doesn't support server-side filtering beyond tags
             keywords = profile.get("title_keywords", [])
             filtered_jobs = self._filter_by_keywords(jobs, keywords)
             
-            logger.info(f"{len(filtered_jobs)} jobs match keywords: {', '.join(keywords[:3])}")
+            logger.info("%d jobs match keywords: %s", len(filtered_jobs), ", ".join(keywords[:3]))
             
             return filtered_jobs
             
         except requests.RequestException as e:
-            logger.error(f"Error fetching from RemoteOK: {e}")
+            logger.error("Error fetching from RemoteOK: %s", e)
             return []
 
     def _filter_by_keywords(self, jobs: list[dict], keywords: list[str]) -> list[dict]:

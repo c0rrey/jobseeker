@@ -87,14 +87,17 @@ class AdzunaFetcher(BaseFetcher):
         all_jobs = []
         seen_urls = set()
         
-        logger.info(f"Fetching jobs from Adzuna (no API salary filter, will filter to ${target_salary:,} locally)...")
-        logger.info(f"Searching for {len(keywords)} keywords: {', '.join(keywords)}")
+        logger.info(
+            "Fetching jobs from Adzuna (no API salary filter, will filter to $%s locally)...",
+            f"{target_salary:,}",
+        )
+        logger.info("Searching for %d keywords: %s", len(keywords), ", ".join(keywords))
         
         # Track if we're hitting pagination limits
         need_more_pages = False
         
         for keyword_idx, keyword in enumerate(keywords, 1):
-            logger.info(f"Keyword {keyword_idx}/{len(keywords)}: '{keyword}'")
+            logger.info("Keyword %d/%d: '%s'", keyword_idx, len(keywords), keyword)
             
             # Search both Florida and nationwide remote for this keyword
             locations = [
@@ -130,13 +133,13 @@ class AdzunaFetcher(BaseFetcher):
                             break
                             
                     except requests.RequestException as e:
-                        logger.warning(f"Error on page {page}: {str(e)[:80]}")
+                        logger.warning("Error on page %d: %s", page, str(e)[:80])
                         continue
                 
                 if jobs_from_location:
-                    logger.info(f"{location_name}: {len(jobs_from_location)} jobs")
-        
-        logger.info(f"Total: {len(all_jobs)} unique jobs fetched")
+                    logger.info("%s: %d jobs", location_name, len(jobs_from_location))
+
+        logger.info("Total: %d unique jobs fetched", len(all_jobs))
         
         # Auto-increase pagination if we're hitting limits frequently
         if need_more_pages and self.auto_increase_pages and self.max_pages < 10:
