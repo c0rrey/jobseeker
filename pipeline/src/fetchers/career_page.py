@@ -27,6 +27,7 @@ import logging
 import sqlite3
 from datetime import datetime, timezone
 from typing import Any, Optional
+from urllib.parse import urlparse
 
 import requests
 
@@ -324,8 +325,6 @@ class CareerPageFetcher(BaseFetcher):
             return href
         if href.startswith("/"):
             # Derive origin from base_url
-            from urllib.parse import urlparse
-
             parsed = urlparse(base_url)
             return f"{parsed.scheme}://{parsed.netloc}{href}"
         return href
