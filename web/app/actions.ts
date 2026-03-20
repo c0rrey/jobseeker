@@ -28,7 +28,7 @@ export async function submitFeedback(formData: FormData): Promise<void> {
   const signal = formData.get("signal") as string;
   const note = (formData.get("note") as string | null) || null;
 
-  if (Number.isNaN(jobId) || !["thumbs_up", "thumbs_down"].includes(signal)) {
+  if (!jobId || !["thumbs_up", "thumbs_down"].includes(signal)) {
     throw new Error("Invalid feedback parameters");
   }
 
@@ -75,7 +75,7 @@ export async function updateCompanyCareerUrl(formData: FormData): Promise<void> 
   const careerUrl =
     (formData.get("career_page_url") as string | null)?.trim() || null;
 
-  if (Number.isNaN(id)) {
+  if (!id) {
     throw new Error("Company id is required");
   }
 
@@ -94,7 +94,7 @@ export async function updateCompanyCareerUrl(formData: FormData): Promise<void> 
 export async function toggleCompanyTarget(formData: FormData): Promise<void> {
   const id = Number(formData.get("id"));
 
-  if (Number.isNaN(id)) {
+  if (!id) {
     throw new Error("Company id is required");
   }
 
