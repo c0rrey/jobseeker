@@ -192,17 +192,17 @@ def _call_with_backoff(
     return False
 
 
-def _update_enriched_at(conn: sqlite3.Connection, company_name: str) -> None:
+def _update_enriched_at(conn: sqlite3.Connection, company_id: int) -> None:
     """Stamp ``enriched_at`` with the current UTC time for the given company.
 
     Args:
         conn: Open SQLite connection to the V2 pipeline database.
-        company_name: The company display name identifying the row to update.
+        company_id: The primary key of the company row to update.
     """
     now = datetime.now(tz=timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
     conn.execute(
-        "UPDATE companies SET enriched_at = ? WHERE name = ?",
-        (now, company_name),
+        "UPDATE companies SET enriched_at = ? WHERE id = ?",
+        (now, company_id),
     )
     conn.commit()
 
@@ -275,7 +275,7 @@ def run_enrichment(db_connection: sqlite3.Connection) -> EnrichmentSummary:
             else:
                 failed[source_name] += 1
 
-        _update_enriched_at(db_connection, company_name)
+        _update_enriched_at(db_connection, company_id)
 
     summary: EnrichmentSummary = {
         "companies_processed": len(companies),
