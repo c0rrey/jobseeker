@@ -76,6 +76,15 @@ def _make_conn(
     conn.row_factory = sqlite3.Row
     conn.execute(
         """
+        CREATE TABLE companies (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL DEFAULT 'Acme Corp'
+        )
+        """
+    )
+    conn.execute("INSERT INTO companies (id, name) VALUES (1, 'Acme Corp')")
+    conn.execute(
+        """
         CREATE TABLE career_page_configs (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             company_id INTEGER NOT NULL DEFAULT 1,
@@ -83,7 +92,8 @@ def _make_conn(
             discovery_method TEXT NOT NULL DEFAULT 'manual',
             scrape_strategy TEXT,
             last_crawled_at TEXT,
-            status TEXT NOT NULL DEFAULT 'active'
+            status TEXT NOT NULL DEFAULT 'active',
+            FOREIGN KEY (company_id) REFERENCES companies(id)
         )
         """
     )
