@@ -7,6 +7,7 @@
  */
 
 import Database from "better-sqlite3";
+import fs from "fs";
 import path from "path";
 
 // Resolve the database path relative to this file's location (__dirname = web/lib/).
@@ -27,6 +28,10 @@ let db: Database.Database | null = null;
 export function getDb(): Database.Database {
   if (db) {
     return db;
+  }
+
+  if (!fs.existsSync(DB_PATH)) {
+    throw new Error(`Database not found at ${DB_PATH}. Run the pipeline first.`);
   }
 
   db = new Database(DB_PATH);
