@@ -1,0 +1,14 @@
+# Red flags — job postings containing these are filtered out.
+# Matches are case-insensitive.
+
+# Exact phrases (must appear as-is in the posting)
+phrases:
+  - "unpaid internship"
+  - "equity only"
+  - "you must have 10 years in blockchain"
+
+# Individual keywords (posting is filtered if any appear)
+keywords:
+  - pyramid scheme
+  - multi-level marketing
+  - commission only

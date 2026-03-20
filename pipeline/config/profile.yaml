@@ -1,0 +1,68 @@
+# Your job search profile — edit this to match what you're looking for.
+# Used by the matcher to score and rank job postings.
+
+# Keywords to look for in job titles
+title_keywords:
+  - data engineer
+  - analytics engineer
+  - product analytics
+  - data analyst
+  - product analyst
+  - decision systems
+  - product data
+
+# Skills you have / want to use
+skills:
+  - SQL (Presto, Spark, PostgreSQL)
+  - Python (Pandas, NumPy)
+  - dbt
+  - Dimensional modeling
+  - Semantic layers
+  - Analytics marts
+  - Data quality & observability
+  - Metric governance
+  - KPI frameworks
+  - Product measurement
+  - Funnel & cohort analysis
+  - Git
+  - Airflow
+  - Workflow orchestration
+
+# Industries or company types to avoid
+avoid_industries:
+  - adult content
+
+# Location preference: remote | hybrid | onsite (or a list of these)
+location_preference: remote
+
+# Preferred locations (for LLM scoring - not hard filters)
+# Jobs in these areas will score higher, but all FL + remote jobs are included
+preferred_locations:
+  - Tampa, FL
+  - Orlando, FL
+  - Remote
+
+# Minimum salary (annual, USD)
+salary_min: 130000
+
+# Maximum job age (days) - filter out postings older than this
+max_job_age_days: 90
+
+# Seniority levels you're targeting
+seniority:
+  - senior
+  - staff
+  - principal
+
+# Optional: Free-form text for LLM-based matching
+# The matcher uses this to understand nuance beyond keyword overlap
+freeform_preferences: |
+  10+ years experience in product analytics and decision systems.
+  Former Meta Data Engineer who owned product measurement and executive reporting for large-scale consumer products.
+  Strong preference for roles partnering closely with product and engineering teams to define metrics strategy and build measurement frameworks.
+  Expertise in analytics engineering: dimensional modeling, semantic layers, dbt-style workflows, and data quality.
+  Interested in product-focused companies where analytics drives strategic decisions.
+  Experience with executive storytelling and stakeholder decision support.
+  Prefer roles with meaningful impact on product strategy and roadmap prioritization.
+  Prefer product companies over agencies.
+  Interested in AI/ML tooling.
