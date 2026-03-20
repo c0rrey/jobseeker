@@ -6,6 +6,8 @@ formats into the Job dataclass so the rest of the pipeline is
 source-agnostic.
 """
 
+import json
+
 from .models import Job
 
 
@@ -18,7 +20,7 @@ def normalize_mock(raw: dict) -> Job:
         description=raw["description"],
         source="mock",
         location=raw.get("location"),
-        raw=raw,
+        raw_json=json.dumps(raw),
     )
 
 
@@ -49,7 +51,7 @@ def normalize_adzuna(raw: dict) -> Job:
         salary_min=raw.get("salary_min"),
         salary_max=raw.get("salary_max"),
         posted_at=raw.get("created"),
-        raw=raw,
+        raw_json=json.dumps(raw),
     )
 
 
@@ -84,7 +86,7 @@ def normalize_remoteok(raw: dict) -> Job:
         salary_min=raw.get("salary_min") if raw.get("salary_min", 0) > 0 else None,
         salary_max=raw.get("salary_max") if raw.get("salary_max", 0) > 0 else None,
         posted_at=raw.get("date"),
-        raw=raw,
+        raw_json=json.dumps(raw),
     )
 
 
