@@ -1,0 +1,6 @@
+
+# local environment variables — never commit secrets
+.env
+
+# crumb session artifacts (ephemeral — not committed)
+.crumbs/sessions/
