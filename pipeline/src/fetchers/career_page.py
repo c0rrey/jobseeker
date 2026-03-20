@@ -89,6 +89,7 @@ class CareerPageFetcher(BaseFetcher):
             url: str = config["url"]
             last_crawled_at: Optional[str] = config["last_crawled_at"]
             strategy_json: Optional[str] = config["scrape_strategy"]
+            company_name: str = config["company_name"]
 
             if not strategy_json:
                 logger.warning(
@@ -117,6 +118,9 @@ class CareerPageFetcher(BaseFetcher):
 
             jobs = self._extract_jobs(html, strategy, config_id, url)
 
+            # Annotate each job with company name for the normalizer
+            jobs = [{**job, "_company_name": company_name} for job in jobs]
+
             # Update timestamp regardless of result count
             self._update_last_crawled(config_id)
 
@@ -144,15 +148,17 @@ class CareerPageFetcher(BaseFetcher):
 
     def _query_active_configs(self) -> list[sqlite3.Row]:
         """
-        Return all career_page_configs with status='active'.
+        Return all career_page_configs with status='active', joined with company name.
 
         Returns:
-            List of sqlite3.Row objects.
+            List of sqlite3.Row objects including company_name.
         """
         sql = """
-            SELECT id, url, scrape_strategy, last_crawled_at
-            FROM career_page_configs
-            WHERE status = 'active'
+            SELECT cpc.id, cpc.url, cpc.scrape_strategy, cpc.last_crawled_at,
+                   c.name AS company_name
+            FROM career_page_configs cpc
+            JOIN companies c ON c.id = cpc.company_id
+            WHERE cpc.status = 'active'
         """
         try:
             return self._conn.execute(sql).fetchall()

@@ -19,6 +19,7 @@ def normalize_mock(raw: dict) -> Job:
         url=raw["url"],
         description=raw["description"],
         source="mock",
+        source_type="mock",
         location=raw.get("location"),
         raw_json=json.dumps(raw),
     )
@@ -43,11 +44,12 @@ def normalize_adzuna(raw: dict) -> Job:
     """
     return Job(
         title=raw.get("title", ""),
-        company=raw.get("company", {}).get("display_name", "Unknown"),
+        company=(raw.get("company") or {}).get("display_name", "Unknown"),
         url=raw.get("redirect_url", ""),
         description=raw.get("description", ""),
         source="adzuna",
-        location=raw.get("location", {}).get("display_name"),
+        source_type="api",
+        location=(raw.get("location") or {}).get("display_name"),
         salary_min=raw.get("salary_min"),
         salary_max=raw.get("salary_max"),
         posted_at=raw.get("created"),
@@ -82,6 +84,7 @@ def normalize_remoteok(raw: dict) -> Job:
         url=raw.get("apply_url") or raw.get("url", ""),
         description=raw.get("description", ""),
         source="remoteok",
+        source_type="api",
         location=raw.get("location"),
         salary_min=raw.get("salary_min") if raw.get("salary_min", 0) > 0 else None,
         salary_max=raw.get("salary_max") if raw.get("salary_max", 0) > 0 else None,
@@ -242,7 +245,7 @@ def normalize_career_page(raw: dict) -> Job:
     """
     return Job(
         title=raw.get("title", ""),
-        company=raw.get("company", "Unknown"),
+        company=raw.get("_company_name", "Unknown"),
         url=raw.get("url", ""),
         description=raw.get("description"),
         source="career_page",
