@@ -67,7 +67,7 @@ function extractProfileSkills(yaml: string | null): string[] {
   return skills;
 }
 
-function normalise(s: string): string {
+function normalize(s: string): string {
   return s.toLowerCase().replace(/[^a-z0-9+#.]/g, " ").trim();
 }
 
@@ -110,13 +110,13 @@ export function SkillsComparison({
     );
   }
 
-  const resumeNorm = new Set(resumeSkills.map(normalise));
-  const profileNorm = new Set(profileSkills.map(normalise));
+  const resumeNorm = new Set(resumeSkills.map(normalize));
+  const profileNorm = new Set(profileSkills.map(normalize));
 
-  const matched = resumeSkills.filter((s) => profileNorm.has(normalise(s)));
-  const resumeOnly = resumeSkills.filter((s) => !profileNorm.has(normalise(s)));
+  const matched = resumeSkills.filter((s) => profileNorm.has(normalize(s)));
+  const resumeOnly = resumeSkills.filter((s) => !profileNorm.has(normalize(s)));
   const profileOnly = profileSkills.filter(
-    (s) => !resumeNorm.has(normalise(s))
+    (s) => !resumeNorm.has(normalize(s))
   );
 
   return (
