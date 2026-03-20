@@ -247,6 +247,9 @@ def _call_llm(prompt: str) -> Optional[str]:
             max_tokens=1024,
             messages=[{"role": "user", "content": prompt}],
         )
+        if not message.content:
+            logger.warning("LLM returned empty content list")
+            return None
         return message.content[0].text
     except Exception as exc:  # noqa: BLE001
         logger.warning("LLM call failed: %s", exc)
