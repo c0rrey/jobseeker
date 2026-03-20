@@ -15,8 +15,7 @@ from pathlib import Path
 
 import pytest
 
-# conftest.py adds pipeline/ to sys.path so this import works without install.
-from config.settings import (
+from pipeline.config.settings import (
     PROJECT_ROOT,
     get_adzuna_credentials,
     get_crunchbase_key,
@@ -205,7 +204,7 @@ class TestDotenvLoading:
     def test_module_imports_without_env_file(self) -> None:
         """settings.py imports cleanly even when no .env file exists."""
         # If we reach here the module already imported successfully.
-        from config import settings  # noqa: F401
+        from pipeline.config import settings  # noqa: F401
 
         assert hasattr(settings, "PROJECT_ROOT")
         assert hasattr(settings, "get_rapidapi_key")
