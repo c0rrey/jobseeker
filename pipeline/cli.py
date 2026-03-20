@@ -40,7 +40,7 @@ from pipeline.src.fetchers import (
     LinkedInFetcher,
     RemoteOKFetcher,
 )
-from pipeline.src.filter import run_prefilter
+from pipeline.src.filter import run_prefilter as _filter_run_prefilter
 from pipeline.src.normalizer import (
     normalize_adzuna,
     normalize_ashby,
@@ -182,7 +182,7 @@ def run_enrich(db_path: str) -> dict[str, Any]:
         conn.close()
 
 
-def run_prefilter_stage(db_path: str) -> dict[str, int]:
+def run_prefilter(db_path: str) -> dict[str, int]:
     """Run the deterministic pre-filter on unfiltered jobs.
 
     Args:
@@ -193,7 +193,7 @@ def run_prefilter_stage(db_path: str) -> dict[str, int]:
     """
     conn = get_connection(db_path)
     try:
-        return run_prefilter(conn)
+        return _filter_run_prefilter(conn)
     finally:
         conn.close()
 
@@ -344,7 +344,7 @@ def main(argv: list[str] | None = None) -> int:
             _print_enrich_summary(summary)
 
         elif args.prefilter:
-            summary = run_prefilter_stage(db_path)
+            summary = run_prefilter(db_path)
             _print_prefilter_summary(summary)
 
         elif args.all:
@@ -356,7 +356,7 @@ def main(argv: list[str] | None = None) -> int:
             enrich_summary = run_enrich(db_path)
             _print_enrich_summary(enrich_summary)
 
-            prefilter_summary = run_prefilter_stage(db_path)
+            prefilter_summary = run_prefilter(db_path)
             _print_prefilter_summary(prefilter_summary)
 
     except Exception:
