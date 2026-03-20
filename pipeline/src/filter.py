@@ -125,9 +125,9 @@ def is_too_old(job: Job, max_age_days: int = 90) -> bool:
         return False
 
 
-def should_filter(job: Job, red_flags: dict | None = None) -> bool:
+def has_red_flags(job: Job, red_flags: dict | None = None) -> bool:
     """
-    Return True if the job should be filtered out (has red flags).
+    Return True if the job contains red-flag keywords or phrases.
 
     Args:
         job: The job to check.
@@ -243,7 +243,7 @@ def filter_jobs(jobs: list[Job]) -> list[Job]:
     logger.info(f"After age filter ({max_age_days} days): {len(jobs)}/{initial_count} jobs")
 
     # Filter 5: Remove red flags
-    jobs = [j for j in jobs if not should_filter(j, red_flags)]
+    jobs = [j for j in jobs if not has_red_flags(j, red_flags)]
     logger.info(f"After red flag filter: {len(jobs)}/{initial_count} jobs")
 
     # Filter 6: Location filtering
@@ -289,7 +289,7 @@ def run_prefilter(db_connection: sqlite3.Connection) -> dict[str, int]:
     been processed by any pipeline stage yet) and applies four deterministic
     filters in order:
 
-    1. Red flag keyword/phrase check (``should_filter``)
+    1. Red flag keyword/phrase check (``has_red_flags``)
     2. Salary minimum check (``meets_salary_requirement``)
     3. Intern/internship/co-op title check (``is_intern_role``)
     4. Posting age check (``is_too_old``)
@@ -333,7 +333,7 @@ def run_prefilter(db_connection: sqlite3.Connection) -> dict[str, int]:
         job = _row_to_job(row)
 
         reason: Optional[str] = None
-        if should_filter(job, red_flags):
+        if has_red_flags(job, red_flags):
             reason = "red_flag"
         elif not meets_salary_requirement(job, min_salary):
             reason = "salary"
