@@ -8,6 +8,7 @@ The API returns a different structure than our Job schema;
 the normalizer handles the conversion.
 """
 
+import logging
 import time
 from typing import Optional
 
@@ -16,6 +17,8 @@ import requests
 from pipeline.config.settings import get_adzuna_credentials, load_profile
 
 from .base import BaseFetcher
+
+logger = logging.getLogger(__name__)
 
 
 class AdzunaFetcher(BaseFetcher):
@@ -84,14 +87,14 @@ class AdzunaFetcher(BaseFetcher):
         all_jobs = []
         seen_urls = set()
         
-        print(f"Fetching jobs from Adzuna (no API salary filter, will filter to ${target_salary:,} locally)...")
-        print(f"Searching for {len(keywords)} keywords: {', '.join(keywords)}")
+        logger.info(f"Fetching jobs from Adzuna (no API salary filter, will filter to ${target_salary:,} locally)...")
+        logger.info(f"Searching for {len(keywords)} keywords: {', '.join(keywords)}")
         
         # Track if we're hitting pagination limits
         need_more_pages = False
         
         for keyword_idx, keyword in enumerate(keywords, 1):
-            print(f"\n  Keyword {keyword_idx}/{len(keywords)}: '{keyword}'")
+            logger.info(f"Keyword {keyword_idx}/{len(keywords)}: '{keyword}'")
             
             # Search both Florida and nationwide remote for this keyword
             locations = [
@@ -127,19 +130,19 @@ class AdzunaFetcher(BaseFetcher):
                             break
                             
                     except requests.RequestException as e:
-                        print(f"      Warning: Error on page {page}: {str(e)[:80]}")
+                        logger.warning(f"Error on page {page}: {str(e)[:80]}")
                         continue
                 
                 if jobs_from_location:
-                    print(f"    {location_name}: {len(jobs_from_location)} jobs")
+                    logger.info(f"{location_name}: {len(jobs_from_location)} jobs")
         
-        print(f"\nTotal: {len(all_jobs)} unique jobs fetched")
+        logger.info(f"Total: {len(all_jobs)} unique jobs fetched")
         
         # Auto-increase pagination if we're hitting limits frequently
         if need_more_pages and self.auto_increase_pages and self.max_pages < 10:
-            print(f"\n⚠️  Hit pagination limit on some searches.")
-            print(f"   Consider running again with max_pages=10 for better coverage.")
-            print(f"   Example: AdzunaFetcher(max_pages=10)")
+            logger.warning("Hit pagination limit on some searches.")
+            logger.warning("Consider running again with max_pages=10 for better coverage.")
+            logger.warning("Example: AdzunaFetcher(max_pages=10)")
         
         return all_jobs
 

@@ -7,6 +7,7 @@ No API key required - completely free and open.
 API: https://remoteok.com/api
 """
 
+import logging
 import time
 from typing import Optional
 
@@ -15,6 +16,8 @@ import requests
 from pipeline.config.settings import load_profile
 
 from .base import BaseFetcher
+
+logger = logging.getLogger(__name__)
 
 
 class RemoteOKFetcher(BaseFetcher):
@@ -41,7 +44,7 @@ class RemoteOKFetcher(BaseFetcher):
         """
         profile = load_profile()
         
-        print(f"Fetching remote jobs from RemoteOK...")
+        logger.info("Fetching remote jobs from RemoteOK...")
         
         try:
             # RemoteOK API returns all jobs in one call
@@ -59,19 +62,19 @@ class RemoteOKFetcher(BaseFetcher):
             # First item is metadata, skip it
             jobs = data[1:] if len(data) > 1 else []
             
-            print(f"  Retrieved {len(jobs)} jobs from RemoteOK")
+            logger.info(f"Retrieved {len(jobs)} jobs from RemoteOK")
             
             # Filter by relevant keywords locally
             # RemoteOK doesn't support server-side filtering beyond tags
             keywords = profile.get("title_keywords", [])
             filtered_jobs = self._filter_by_keywords(jobs, keywords)
             
-            print(f"  {len(filtered_jobs)} jobs match keywords: {', '.join(keywords[:3])}")
+            logger.info(f"{len(filtered_jobs)} jobs match keywords: {', '.join(keywords[:3])}")
             
             return filtered_jobs
             
         except requests.RequestException as e:
-            print(f"  Error fetching from RemoteOK: {e}")
+            logger.error(f"Error fetching from RemoteOK: {e}")
             return []
 
     def _filter_by_keywords(self, jobs: list[dict], keywords: list[str]) -> list[dict]:

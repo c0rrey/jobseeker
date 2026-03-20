@@ -12,13 +12,16 @@ database and marks filtered-out jobs by inserting a score_dimensions
 sentinel row (pass=0, overall=-1) so downstream scoring stages skip them.
 """
 
+import logging
 import sqlite3
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 
 from pipeline.config.settings import load_profile, load_red_flags
 
 from .models import Job
+
+logger = logging.getLogger(__name__)
 
 
 def meets_salary_requirement(job: Job, min_salary: int) -> bool:
@@ -116,9 +119,11 @@ def is_too_old(job: Job, max_age_days: int = 90) -> bool:
         return False
     
     try:
-        # Parse ISO format: "2026-01-05T10:41:12Z"
+        # Parse ISO format: "2026-01-05T10:41:12Z" or date-only "2026-03-01"
         posted_date = datetime.fromisoformat(job.posted_at.replace("Z", "+00:00"))
-        age_days = (datetime.now(posted_date.tzinfo) - posted_date).days
+        if posted_date.tzinfo is None:
+            posted_date = posted_date.replace(tzinfo=timezone.utc)
+        age_days = (datetime.now(timezone.utc) - posted_date).days
         return age_days > max_age_days
     except (ValueError, AttributeError):
         # If we can't parse the date, keep the job
@@ -136,7 +141,7 @@ def should_filter(job: Job, red_flags: dict | None = None) -> bool:
     if red_flags is None:
         red_flags = load_red_flags()
 
-    text = f"{job.title} {job.description}".lower()
+    text = f"{job.title or ''} {job.description or ''}".lower()
     phrases = red_flags.get("phrases", [])
     keywords = red_flags.get("keywords", [])
 
@@ -226,27 +231,27 @@ def filter_jobs(jobs: list[Job]) -> list[Job]:
     
     # Filter 1: Title keywords (must match target roles)
     jobs = [j for j in jobs if matches_title_keywords(j, title_keywords)]
-    print(f"  After title keyword filter: {len(jobs)}/{initial_count} jobs")
-    
+    logger.info(f"After title keyword filter: {len(jobs)}/{initial_count} jobs")
+
     # Filter 2: Salary minimum
     jobs = [j for j in jobs if meets_salary_requirement(j, min_salary)]
-    print(f"  After salary filter (>=${min_salary:,}): {len(jobs)}/{initial_count} jobs")
-    
+    logger.info(f"After salary filter (>=${min_salary:,}): {len(jobs)}/{initial_count} jobs")
+
     # Filter 3: Remove intern roles
     jobs = [j for j in jobs if not is_intern_role(j)]
-    print(f"  After intern filter: {len(jobs)}/{initial_count} jobs")
-    
+    logger.info(f"After intern filter: {len(jobs)}/{initial_count} jobs")
+
     # Filter 4: Remove old postings
     jobs = [j for j in jobs if not is_too_old(j, max_age_days)]
-    print(f"  After age filter ({max_age_days} days): {len(jobs)}/{initial_count} jobs")
-    
+    logger.info(f"After age filter ({max_age_days} days): {len(jobs)}/{initial_count} jobs")
+
     # Filter 5: Remove red flags
     jobs = [j for j in jobs if not should_filter(j, red_flags)]
-    print(f"  After red flag filter: {len(jobs)}/{initial_count} jobs")
-    
+    logger.info(f"After red flag filter: {len(jobs)}/{initial_count} jobs")
+
     # Filter 6: Location filtering
     jobs = [j for j in jobs if is_allowed_location(j)]
-    print(f"  After location filter: {len(jobs)}/{initial_count} jobs")
+    logger.info(f"After location filter: {len(jobs)}/{initial_count} jobs")
 
     return jobs
 
