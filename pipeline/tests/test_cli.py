@@ -34,7 +34,7 @@ from pipeline.cli import (
     main,
     run_enrich,
     run_fetch,
-    run_prefilter_stage,
+    run_prefilter,
 )
 
 # ---------------------------------------------------------------------------
@@ -53,7 +53,7 @@ _PATCH_CAREER = "pipeline.cli.CareerPageFetcher"
 
 _PATCH_DEDUP = "pipeline.cli.deduplicate_and_insert"
 _PATCH_RUN_ENRICHMENT = "pipeline.cli.run_enrichment"
-_PATCH_RUN_PREFILTER = "pipeline.cli.run_prefilter"
+_PATCH_RUN_PREFILTER = "pipeline.cli._filter_run_prefilter"
 
 # ---------------------------------------------------------------------------
 # Fixtures
