@@ -1,15 +1,10 @@
 """
 Filter — remove jobs that don't meet requirements.
 
-Applies multiple filters:
-1. Red flags (keywords/phrases to avoid)
-2. Location restrictions (remote or Tampa/Orlando area only)
-3. Job age (filter out old postings)
-4. Title restrictions (no intern roles)
-
-V2 addition: run_prefilter(db_connection) reads unscored jobs from the
-database and marks filtered-out jobs by inserting a score_dimensions
-sentinel row (pass=0, overall=-1) so downstream scoring stages skip them.
+``filter_jobs`` applies deterministic filters to an in-memory list of
+:class:`~pipeline.src.models.Job` objects; ``run_prefilter`` performs the
+same filtering against unscored rows in the SQLite database, marking
+rejected jobs with a sentinel row so downstream scoring stages skip them.
 """
 
 import logging
