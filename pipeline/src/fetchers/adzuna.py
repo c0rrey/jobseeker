@@ -186,5 +186,5 @@ class AdzunaFetcher(BaseFetcher):
             try:
                 error_data = e.response.json()
                 raise requests.RequestException(f"API Error: {error_data}")
-            except:
+            except (ValueError, AttributeError):
                 raise e
