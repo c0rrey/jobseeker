@@ -52,7 +52,7 @@ CREATE TABLE IF NOT EXISTS score_dimensions (
     job_id INTEGER NOT NULL REFERENCES jobs(id),
     pass INTEGER NOT NULL,
     role_fit INTEGER,
-    skills_gap INTEGER,
+    skills_match INTEGER,
     culture_signals INTEGER,
     growth_potential INTEGER,
     comp_alignment INTEGER,

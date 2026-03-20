@@ -376,7 +376,7 @@ class TestScoreDimension:
         "job_id",
         "pass_num",
         "role_fit",
-        "skills_gap",
+        "skills_match",
         "culture_signals",
         "growth_potential",
         "comp_alignment",
@@ -406,7 +406,7 @@ class TestScoreDimension:
 
     def test_optional_dimensions_default_none(self):
         sd = ScoreDimension(job_id=1, pass_num=1, overall=0)
-        for dim in ("role_fit", "skills_gap", "culture_signals", "growth_potential", "comp_alignment"):
+        for dim in ("role_fit", "skills_match", "culture_signals", "growth_potential", "comp_alignment"):
             assert getattr(sd, dim) is None, f"Expected None for {dim}"
 
     def test_full_pass2_construction(self):
@@ -415,7 +415,7 @@ class TestScoreDimension:
             job_id=5,
             pass_num=2,
             role_fit=85,
-            skills_gap=70,
+            skills_match=70,
             culture_signals=60,
             growth_potential=80,
             comp_alignment=75,

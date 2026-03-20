@@ -14,7 +14,7 @@ The table below contains user feedback signals (thumbs_up / thumbs_down) linked 
 
 **Important caveats:**
 - A single job may appear more than once if the user submitted multiple feedback signals for it.
-- Score fields (overall, role_fit, skills_gap, etc.) may be null for jobs that have not been fully scored.
+- Score fields (overall, role_fit, skills_match, etc.) may be null for jobs that have not been fully scored.
 - `score_pass` indicates whether the score came from Pass 1 (fast filter) or Pass 2 (deep analysis). Pass 2 scores are more reliable.
 
 ```json
@@ -32,7 +32,7 @@ Each feedback object has these fields:
 - `location`: job location (may be null)
 - `overall`: composite score 0–100 (may be null)
 - `role_fit`: role fit score 0–100 (may be null)
-- `skills_gap`: skills gap score 0–100 (may be null)
+- `skills_match`: skills gap score 0–100 (may be null)
 - `culture_signals`: culture signals score 0–100 (may be null)
 - `growth_potential`: growth potential score 0–100 (may be null)
 - `comp_alignment`: compensation alignment score 0–100 (may be null)

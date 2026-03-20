@@ -119,7 +119,7 @@ CREATE TABLE score_dimensions (
     job_id INTEGER NOT NULL REFERENCES jobs(id),
     pass INTEGER NOT NULL,            -- 1 = fast filter, 2 = deep analysis
     role_fit INTEGER,                 -- 0-100
-    skills_gap INTEGER,               -- 0-100
+    skills_match INTEGER,              -- 0-100
     culture_signals INTEGER,          -- 0-100
     growth_potential INTEGER,         -- 0-100
     comp_alignment INTEGER,           -- 0-100
@@ -250,7 +250,7 @@ Runs on jobs with `company_id` where the company has no enrichment or stale enri
 | Crunchbase (free tier) | Size, funding, industry, HQ | `companies` metadata |
 | Glassdoor (scrape/API) | Overall rating, culture, WLB | `culture_signals` dimension |
 | levels.fyi | Comp data by company+role+level | `comp_alignment` dimension |
-| StackShare + job desc analysis | Tech stack | `skills_gap` dimension |
+| StackShare + job desc analysis | Tech stack | `skills_match` dimension |
 
 Each enrichment function writes to the `companies` table independently.
 

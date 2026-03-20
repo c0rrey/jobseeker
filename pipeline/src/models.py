@@ -135,7 +135,7 @@ class ScoreDimension:
 
     # Dimension scores (0-100); absent on Pass 1 fast-filter rows
     role_fit: Optional[int] = None
-    skills_gap: Optional[int] = None
+    skills_match: Optional[int] = None
     culture_signals: Optional[int] = None
     growth_potential: Optional[int] = None
     comp_alignment: Optional[int] = None

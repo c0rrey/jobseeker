@@ -128,7 +128,7 @@ def get_feedback_with_scores(
         List of dicts with keys:
             feedback_id, job_id, signal, note, feedback_created_at,
             title, company, location,
-            overall, role_fit, skills_gap, culture_signals,
+            overall, role_fit, skills_match, culture_signals,
             growth_potential, comp_alignment, score_pass, reasoning.
         Empty list when no feedback exists.
     """
@@ -146,7 +146,7 @@ def get_feedback_with_scores(
             j.location      AS location,
             sd.overall      AS overall,
             sd.role_fit     AS role_fit,
-            sd.skills_gap   AS skills_gap,
+            sd.skills_match AS skills_match,
             sd.culture_signals AS culture_signals,
             sd.growth_potential AS growth_potential,
             sd.comp_alignment AS comp_alignment,

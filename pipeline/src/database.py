@@ -87,7 +87,7 @@ CREATE TABLE IF NOT EXISTS score_dimensions (
     job_id INTEGER NOT NULL REFERENCES jobs(id),
     pass INTEGER NOT NULL,
     role_fit INTEGER,
-    skills_gap INTEGER,
+    skills_match INTEGER,
     culture_signals INTEGER,
     growth_potential INTEGER,
     comp_alignment INTEGER,
@@ -247,6 +247,13 @@ def init_db(db_path: str | Path) -> None:
             conn.execute(create_sql)
             for idx_sql in index_sqls:
                 conn.execute(idx_sql)
+        # Migration: rename skills_gap → skills_match for existing databases.
+        # PRAGMA table_info returns one row per column; column 1 is the name.
+        cols = {row[1] for row in conn.execute("PRAGMA table_info(score_dimensions)")}
+        if "skills_gap" in cols:
+            conn.execute(
+                "ALTER TABLE score_dimensions RENAME COLUMN skills_gap TO skills_match"
+            )
         conn.commit()
     finally:
         conn.close()

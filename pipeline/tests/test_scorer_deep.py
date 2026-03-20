@@ -93,7 +93,7 @@ def _insert_score(
     overall: int = 75,
     profile_hash: str | None = None,
     role_fit: int | None = None,
-    skills_gap: int | None = None,
+    skills_match: int | None = None,
     culture_signals: int | None = None,
     growth_potential: int | None = None,
     comp_alignment: int | None = None,
@@ -102,7 +102,7 @@ def _insert_score(
     conn.execute(
         """
         INSERT INTO score_dimensions
-            (job_id, pass, overall, profile_hash, role_fit, skills_gap,
+            (job_id, pass, overall, profile_hash, role_fit, skills_match,
              culture_signals, growth_potential, comp_alignment)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
@@ -112,7 +112,7 @@ def _insert_score(
             overall,
             profile_hash,
             role_fit,
-            skills_gap,
+            skills_match,
             culture_signals,
             growth_potential,
             comp_alignment,
@@ -381,7 +381,7 @@ class TestWritePass2Results:
                 {
                     "job_id": job_id,
                     "role_fit": 80,
-                    "skills_gap": 75,
+                    "skills_match": 75,
                     "culture_signals": 70,
                     "growth_potential": 65,
                     "comp_alignment": 80,
@@ -403,7 +403,7 @@ class TestWritePass2Results:
                 {
                     "job_id": job_id,
                     "role_fit": 90,
-                    "skills_gap": 85,
+                    "skills_match": 85,
                     "culture_signals": 70,
                     "growth_potential": 60,
                     "comp_alignment": 75,
@@ -414,14 +414,14 @@ class TestWritePass2Results:
         db_conn.commit()
         row = db_conn.execute(
             """
-            SELECT role_fit, skills_gap, culture_signals, growth_potential,
+            SELECT role_fit, skills_match, culture_signals, growth_potential,
                    comp_alignment, overall
             FROM score_dimensions WHERE job_id = ? AND pass = 2
             """,
             (job_id,),
         ).fetchone()
         assert row["role_fit"] == 90
-        assert row["skills_gap"] == 85
+        assert row["skills_match"] == 85
         assert row["culture_signals"] == 70
         assert row["growth_potential"] == 60
         assert row["comp_alignment"] == 75
@@ -435,7 +435,7 @@ class TestWritePass2Results:
                 {
                     "job_id": job_id,
                     "role_fit": 80,
-                    "skills_gap": 70,
+                    "skills_match": 70,
                     "culture_signals": 60,
                     "growth_potential": 65,
                     "comp_alignment": 70,
@@ -461,7 +461,7 @@ class TestWritePass2Results:
                 {
                     "job_id": job_id,
                     "role_fit": 70,
-                    "skills_gap": 70,
+                    "skills_match": 70,
                     "culture_signals": 70,
                     "growth_potential": 70,
                     "comp_alignment": 70,
@@ -482,7 +482,7 @@ class TestWritePass2Results:
         reasoning = json.dumps(
             {
                 "role_fit": "Strong IC data engineering alignment at staff level.",
-                "skills_gap": "Covers 9 of 10 required skills; missing Flink.",
+                "skills_match": "Covers 9 of 10 required skills; missing Flink.",
                 "culture_signals": "Glassdoor 4.2; positive remote culture reviews.",
                 "growth_potential": "Series C growth stage; greenfield platform scope.",
                 "comp_alignment": "Posted $160k–$185k matches candidate target range.",
@@ -494,7 +494,7 @@ class TestWritePass2Results:
                 {
                     "job_id": job_id,
                     "role_fit": 85,
-                    "skills_gap": 78,
+                    "skills_match": 78,
                     "culture_signals": 72,
                     "growth_potential": 68,
                     "comp_alignment": 82,
@@ -521,7 +521,7 @@ class TestWritePass2Results:
                 {
                     "job_id": job_id,
                     "role_fit": 60,
-                    "skills_gap": 55,
+                    "skills_match": 55,
                     "culture_signals": 50,
                     "growth_potential": 45,
                     "comp_alignment": 60,
@@ -538,7 +538,7 @@ class TestWritePass2Results:
                 {
                     "job_id": job_id,
                     "role_fit": 85,
-                    "skills_gap": 80,
+                    "skills_match": 80,
                     "culture_signals": 72,
                     "growth_potential": 68,
                     "comp_alignment": 82,
@@ -566,7 +566,7 @@ class TestWritePass2Results:
             {
                 "job_id": job_id,
                 "role_fit": 80,
-                "skills_gap": 75,
+                "skills_match": 75,
                 "culture_signals": 70,
                 "growth_potential": 65,
                 "comp_alignment": 80,
@@ -588,7 +588,7 @@ class TestWritePass2Results:
                 {
                     "job_id": id_a,
                     "role_fit": 90,
-                    "skills_gap": 85,
+                    "skills_match": 85,
                     "culture_signals": 80,
                     "growth_potential": 70,
                     "comp_alignment": 85,
@@ -597,7 +597,7 @@ class TestWritePass2Results:
                 {
                     "job_id": id_b,
                     "role_fit": 50,
-                    "skills_gap": 45,
+                    "skills_match": 45,
                     "culture_signals": 40,
                     "growth_potential": 35,
                     "comp_alignment": 50,
@@ -606,7 +606,7 @@ class TestWritePass2Results:
                 {
                     "job_id": id_c,
                     "role_fit": 70,
-                    "skills_gap": 68,
+                    "skills_match": 68,
                     "culture_signals": 65,
                     "growth_potential": 60,
                     "comp_alignment": 72,
@@ -640,14 +640,14 @@ class TestWritePass2Results:
         db_conn.commit()
         row = db_conn.execute(
             """
-            SELECT role_fit, skills_gap, culture_signals,
+            SELECT role_fit, skills_match, culture_signals,
                    growth_potential, comp_alignment
             FROM score_dimensions WHERE job_id = ? AND pass = 2
             """,
             (job_id,),
         ).fetchone()
         assert row["role_fit"] == 0
-        assert row["skills_gap"] == 0
+        assert row["skills_match"] == 0
         assert row["culture_signals"] == 0
         assert row["growth_potential"] == 0
         assert row["comp_alignment"] == 0
@@ -665,7 +665,7 @@ class TestWritePass2Results:
                 {
                     "job_id": job_id,
                     "role_fit": 82,
-                    "skills_gap": 78,
+                    "skills_match": 78,
                     "culture_signals": 70,
                     "growth_potential": 65,
                     "comp_alignment": 80,
