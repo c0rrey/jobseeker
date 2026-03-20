@@ -93,27 +93,27 @@ def _parse_comp_data(raw: dict[str, Any], company_name: str) -> dict[str, Any]:
 
 def _update_company(
     conn: sqlite3.Connection,
-    company_name: str,
+    company_id: int,
     fields: dict[str, Any],
 ) -> None:
-    """Write enrichment fields to the companies table row for company_name.
+    """Write enrichment fields to the companies table row for company_id.
 
     Args:
         conn: Open SQLite connection with the V2 schema.
-        company_name: Identifies the row via the ``name`` column.
+        company_id: Primary key used to locate the row via the ``id`` column.
         fields: Column-value pairs to update.
     """
     fields["enriched_at"] = datetime.now(timezone.utc).isoformat()
     set_clause = ", ".join(f"{col} = ?" for col in fields)
-    values = list(fields.values()) + [company_name]
+    values = list(fields.values()) + [company_id]
     conn.execute(
-        f"UPDATE companies SET {set_clause} WHERE name = ?",  # noqa: S608
+        f"UPDATE companies SET {set_clause} WHERE id = ?",  # noqa: S608
         values,
     )
     conn.commit()
 
 
-def enrich(company_name: str, db_connection: sqlite3.Connection) -> bool:
+def enrich(company_id: int, company_name: str, db_connection: sqlite3.Connection) -> bool:
     """Enrich a company record with levels.fyi compensation data.
 
     Queries levels.fyi for ``company_name`` and serialises the compensation
@@ -124,6 +124,7 @@ def enrich(company_name: str, db_connection: sqlite3.Connection) -> bool:
     docstring for context.
 
     Args:
+        company_id: Primary key of the company row in the companies table.
         company_name: The company display name to look up on levels.fyi.
         db_connection: Open SQLite connection to the V2 pipeline database.
 
@@ -144,7 +145,7 @@ def enrich(company_name: str, db_connection: sqlite3.Connection) -> bool:
         # full context.  When a migration is scheduled, rename this column to
         # ``levelsfy_data`` (or a shared ``enrichment_data`` column).
         fields = {"crunchbase_data": json.dumps(comp_summary)}
-        _update_company(db_connection, company_name, fields)
+        _update_company(db_connection, company_id, fields)
     except Exception as exc:  # noqa: BLE001
         logger.warning(
             "Levels.fyi enrichment failed for '%s': %s", company_name, exc

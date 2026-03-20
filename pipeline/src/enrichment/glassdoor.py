@@ -107,33 +107,35 @@ def _parse_employer(employer: dict[str, Any]) -> dict[str, Any]:
 
 def _update_company(
     conn: sqlite3.Connection,
-    company_name: str,
+    company_id: int,
     fields: dict[str, Any],
 ) -> None:
-    """Write enrichment fields to the companies table row for company_name.
+    """Write enrichment fields to the companies table row for company_id.
 
     Args:
         conn: Open SQLite connection with the V2 schema.
-        company_name: Identifies the row via the ``name`` column.
+        company_id: Primary key used to locate the row via the ``id`` column.
         fields: Column-value pairs to update.
     """
     fields["enriched_at"] = datetime.now(timezone.utc).isoformat()
     set_clause = ", ".join(f"{col} = ?" for col in fields)
-    values = list(fields.values()) + [company_name]
+    values = list(fields.values()) + [company_id]
     conn.execute(
-        f"UPDATE companies SET {set_clause} WHERE name = ?",  # noqa: S608
+        f"UPDATE companies SET {set_clause} WHERE id = ?",  # noqa: S608
         values,
     )
     conn.commit()
 
 
-def enrich(company_name: str, db_connection: sqlite3.Connection) -> bool:
+def enrich(company_id: int, company_name: str, db_connection: sqlite3.Connection) -> bool:
     """Enrich a company record with Glassdoor rating and URL.
 
     Queries the Glassdoor Partner API for ``company_name`` and writes
-    ``glassdoor_rating`` and ``glassdoor_url`` to the matching companies row.
+    ``glassdoor_rating`` and ``glassdoor_url`` to the companies row identified
+    by ``company_id``.
 
     Args:
+        company_id: Primary key of the company row in the companies table.
         company_name: The company display name to look up on Glassdoor.
         db_connection: Open SQLite connection to the V2 pipeline database.
 
@@ -158,7 +160,7 @@ def enrich(company_name: str, db_connection: sqlite3.Connection) -> bool:
 
     try:
         fields = _parse_employer(employer)
-        _update_company(db_connection, company_name, fields)
+        _update_company(db_connection, company_id, fields)
     except Exception as exc:  # noqa: BLE001
         logger.warning(
             "Glassdoor enrichment failed for '%s': %s", company_name, exc
