@@ -35,7 +35,7 @@ Score each dimension from **0 to 100** where:
 Does the role title, scope, and day-to-day responsibilities match what the candidate is looking for?
 Consider: title match to target titles, seniority level (must be senior/staff/principal), IC vs management balance, domain area, and whether the role description reflects the candidate's core competencies.
 
-**2. skills_gap (weight: 25%)**
+**2. skills_match (weight: 25%)**
 How well do the required and preferred skills in the job description align with the candidate's skills?
 Consider: percentage of required skills covered, criticality of missing skills, transferable skills that bridge gaps, and whether the candidate is over-qualified in any meaningful way.
 A score of 100 means every required skill is present; 0 means fundamental required skills are entirely absent.
@@ -65,7 +65,7 @@ Compute `overall` as the weighted composite:
 ```
 overall = round(
     role_fit        * 0.30 +
-    skills_gap      * 0.25 +
+    skills_match      * 0.25 +
     culture_signals * 0.15 +
     growth_potential * 0.15 +
     comp_alignment  * 0.15
@@ -105,14 +105,14 @@ Respond with **only** a valid JSON array. No markdown fences, no preamble, no ex
   {
     "job_id": 42,
     "role_fit": 82,
-    "skills_gap": 75,
+    "skills_match": 75,
     "culture_signals": 70,
     "growth_potential": 65,
     "comp_alignment": 80,
     "overall": 76,
     "reasoning": {
       "role_fit": "Staff data engineer role with 60% IC time; title and scope align well with target profile, though heavy Spark requirement is secondary skill.",
-      "skills_gap": "Covers 8 of 10 required skills; missing Kafka and Flink but candidate has equivalent streaming experience with Kinesis.",
+      "skills_match": "Covers 8 of 10 required skills; missing Kafka and Flink but candidate has equivalent streaming experience with Kinesis.",
       "culture_signals": "Glassdoor 4.1/5 with positive engineering culture reviews; remote-first policy matches candidate preference.",
       "growth_potential": "Series C company in high growth phase; role involves greenfield data platform build, strong scope for impact.",
       "comp_alignment": "Posted $160k–$185k base aligns with candidate target; no equity details provided."
@@ -121,14 +121,14 @@ Respond with **only** a valid JSON array. No markdown fences, no preamble, no ex
   {
     "job_id": 43,
     "role_fit": 30,
-    "skills_gap": 55,
+    "skills_match": 55,
     "culture_signals": 40,
     "growth_potential": 35,
     "comp_alignment": 20,
     "overall": 36,
     "reasoning": {
       "role_fit": "Analytics manager role — primarily people management with 4 direct reports, minimal IC work; does not match candidate's IC-focused preference.",
-      "skills_gap": "Core SQL and dbt skills present, but role requires 3+ years Salesforce CRM analytics which candidate lacks entirely.",
+      "skills_match": "Core SQL and dbt skills present, but role requires 3+ years Salesforce CRM analytics which candidate lacks entirely.",
       "culture_signals": "No Glassdoor data available; job description lacks remote clarity and emphasises office culture with required on-site 3 days/week in Chicago.",
       "growth_potential": "Established enterprise company; role appears maintenance-oriented with limited greenfield opportunity.",
       "comp_alignment": "No salary data available; market rate for Chicago analytics manager role estimated at $120k–$140k, below candidate target of $150k+."
@@ -140,7 +140,7 @@ Respond with **only** a valid JSON array. No markdown fences, no preamble, no ex
 Rules:
 - Each dimension score must be an integer 0–100.
 - `overall` must be the integer result of the weighted formula above (do not round to nearest 5 or 10 — compute precisely).
-- `reasoning` must be a JSON **object** with exactly five keys: `role_fit`, `skills_gap`, `culture_signals`, `growth_potential`, `comp_alignment`.
+- `reasoning` must be a JSON **object** with exactly five keys: `role_fit`, `skills_match`, `culture_signals`, `growth_potential`, `comp_alignment`.
 - Each reasoning value must be a single sentence of 15–40 words that cites specific evidence from the job data or enrichment.
 - You MUST return exactly one object per job in the batch — no additions, no omissions.
 - Preserve the original `job_id` values exactly as provided.

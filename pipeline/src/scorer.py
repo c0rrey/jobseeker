@@ -23,7 +23,7 @@ LLM calls.
 
 Schema reference (database.py L83-98):
     score_dimensions(
-        id, job_id, pass, role_fit, skills_gap, culture_signals,
+        id, job_id, pass, role_fit, skills_match, culture_signals,
         growth_potential, comp_alignment, overall, reasoning,
         scored_at, profile_hash, UNIQUE(job_id, pass)
     )
@@ -378,7 +378,7 @@ def write_pass2_results(
     Each element of ``results`` must contain:
         - ``job_id`` (int): database primary key of the job
         - ``role_fit`` (int): 0-100 role alignment score
-        - ``skills_gap`` (int): 0-100 skills match score
+        - ``skills_match`` (int): 0-100 skills match score
         - ``culture_signals`` (int): 0-100 culture fit score
         - ``growth_potential`` (int): 0-100 growth opportunity score
         - ``comp_alignment`` (int): 0-100 compensation alignment score
@@ -386,7 +386,7 @@ def write_pass2_results(
         - ``reasoning`` (str | None): JSON-serialised per-dimension explanations
 
     The overall score is expected to be pre-computed by the LLM using the
-    canonical weighting (role_fit 30%, skills_gap 25%, culture_signals 15%,
+    canonical weighting (role_fit 30%, skills_match 25%, culture_signals 15%,
     growth_potential 15%, comp_alignment 15%).
 
     The INSERT OR REPLACE strategy satisfies the UNIQUE(job_id, pass) constraint
@@ -418,7 +418,7 @@ def write_pass2_results(
                 continue
             job_id: int = result["job_id"]
             role_fit: int = _safe_int(result.get("role_fit", 0))
-            skills_gap: int = _safe_int(result.get("skills_gap", 0))
+            skills_match: int = _safe_int(result.get("skills_match", 0))
             culture_signals: int = _safe_int(result.get("culture_signals", 0))
             growth_potential: int = _safe_int(result.get("growth_potential", 0))
             comp_alignment: int = _safe_int(result.get("comp_alignment", 0))
@@ -428,11 +428,11 @@ def write_pass2_results(
             db_connection.execute(
                 """
                 INSERT OR REPLACE INTO score_dimensions
-                    (job_id, pass, role_fit, skills_gap, culture_signals,
+                    (job_id, pass, role_fit, skills_match, culture_signals,
                      growth_potential, comp_alignment, overall, reasoning,
                      profile_hash, scored_at)
                 VALUES
-                    (:job_id, :pass, :role_fit, :skills_gap, :culture_signals,
+                    (:job_id, :pass, :role_fit, :skills_match, :culture_signals,
                      :growth_potential, :comp_alignment, :overall, :reasoning,
                      :profile_hash, datetime('now'))
                 """,
@@ -440,7 +440,7 @@ def write_pass2_results(
                     "job_id": job_id,
                     "pass": PASS_2,
                     "role_fit": role_fit,
-                    "skills_gap": skills_gap,
+                    "skills_match": skills_match,
                     "culture_signals": culture_signals,
                     "growth_potential": growth_potential,
                     "comp_alignment": comp_alignment,
