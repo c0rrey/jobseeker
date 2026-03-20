@@ -139,7 +139,8 @@ def enrich(company_id: int, company_name: str, db_connection: sqlite3.Connection
         existing_data: dict[str, Any] = {}
         if existing_row and existing_row[0]:
             try:
-                existing_data = json.loads(existing_row[0])
+                parsed = json.loads(existing_row[0])
+                existing_data = parsed if isinstance(parsed, dict) else {}
             except (json.JSONDecodeError, TypeError):
                 existing_data = {}
 
