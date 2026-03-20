@@ -101,8 +101,8 @@ class EnrichmentSummary(TypedDict):
 
 def _query_companies_needing_enrichment(
     conn: sqlite3.Connection,
-) -> list[str]:
-    """Return company names that need enrichment.
+) -> list[tuple[int, str]]:
+    """Return (id, name) pairs for companies that need enrichment.
 
     A company needs enrichment when:
     - ``enriched_at`` IS NULL, or
@@ -112,11 +112,11 @@ def _query_companies_needing_enrichment(
         conn: Open SQLite connection to the V2 pipeline database.
 
     Returns:
-        List of company name strings in ascending ``id`` order.
+        List of ``(company_id, company_name)`` tuples in ascending ``id`` order.
     """
     rows = conn.execute(
         """
-        SELECT name
+        SELECT id, name
         FROM   companies
         WHERE  enriched_at IS NULL
                OR enriched_at < datetime('now', :threshold)
@@ -124,12 +124,13 @@ def _query_companies_needing_enrichment(
         """,
         {"threshold": f"-{_STALE_DAYS} days"},
     ).fetchall()
-    return [row[0] for row in rows]
+    return [(row[0], row[1]) for row in rows]
 
 
 def _call_with_backoff(
     source_name: str,
-    enrich_fn: Callable[[str, sqlite3.Connection], bool],
+    enrich_fn: Callable[[int, str, sqlite3.Connection], bool],
+    company_id: int,
     company_name: str,
     conn: sqlite3.Connection,
     base_delay: float,
@@ -144,6 +145,7 @@ def _call_with_backoff(
     Args:
         source_name: Human-readable source label used in log messages.
         enrich_fn: The enrichment callable to invoke.
+        company_id: Primary key of the company row passed to ``enrich_fn``.
         company_name: Company display name passed to ``enrich_fn``.
         conn: Open SQLite connection passed to ``enrich_fn``.
         base_delay: Initial sleep duration (seconds) before the first retry.
@@ -153,7 +155,7 @@ def _call_with_backoff(
     """
     for attempt in range(1 + _MAX_RETRIES):
         try:
-            result = enrich_fn(company_name, conn)
+            result = enrich_fn(company_id, company_name, conn)
         except Exception:
             logger.exception(
                 "Unexpected exception in %s enrichment for '%s' (attempt %d/%d).",
@@ -253,16 +255,17 @@ def run_enrichment(db_connection: sqlite3.Connection) -> EnrichmentSummary:
         len(companies),
     )
 
-    for company_name in companies:
-        logger.debug("Enriching company: '%s'.", company_name)
+    for company_id, company_name in companies:
+        logger.debug("Enriching company: '%s' (id=%d).", company_name, company_id)
 
         for source_name, module, rate_limit in _SOURCES:
             # Access enrich via the module object at call time so that
             # test patches on the module attribute take effect.
-            enrich_fn: Callable[[str, sqlite3.Connection], bool] = module.enrich  # type: ignore[attr-defined]
+            enrich_fn: Callable[[int, str, sqlite3.Connection], bool] = module.enrich  # type: ignore[attr-defined]
             ok = _call_with_backoff(
                 source_name,
                 enrich_fn,
+                company_id,
                 company_name,
                 db_connection,
                 base_delay=rate_limit,

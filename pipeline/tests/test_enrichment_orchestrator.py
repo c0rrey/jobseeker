@@ -129,8 +129,8 @@ class TestQueryCompaniesNeedingEnrichment:
     ) -> None:
         """Companies with enriched_at IS NULL are returned."""
         _insert_company(db_conn, "Alpha Corp", enriched_at=None)
-        names = _query_companies_needing_enrichment(db_conn)
-        assert "Alpha Corp" in names
+        rows = _query_companies_needing_enrichment(db_conn)
+        assert any(name == "Alpha Corp" for _, name in rows)
 
     def test_includes_company_with_stale_enriched_at(
         self, db_conn: sqlite3.Connection
@@ -138,8 +138,8 @@ class TestQueryCompaniesNeedingEnrichment:
         """Companies enriched more than 30 days ago are returned."""
         stale_ts = "2020-01-01 00:00:00"
         _insert_company(db_conn, "Beta Corp", enriched_at=stale_ts)
-        names = _query_companies_needing_enrichment(db_conn)
-        assert "Beta Corp" in names
+        rows = _query_companies_needing_enrichment(db_conn)
+        assert any(name == "Beta Corp" for _, name in rows)
 
     def test_excludes_recently_enriched_company(
         self, db_conn: sqlite3.Connection
@@ -150,21 +150,21 @@ class TestQueryCompaniesNeedingEnrichment:
             ("Gamma Corp",),
         )
         db_conn.commit()
-        names = _query_companies_needing_enrichment(db_conn)
-        assert "Gamma Corp" not in names
+        rows = _query_companies_needing_enrichment(db_conn)
+        assert all(name != "Gamma Corp" for _, name in rows)
 
     def test_empty_table_returns_empty_list(
         self, db_conn: sqlite3.Connection
     ) -> None:
         """Empty companies table yields an empty list."""
-        names = _query_companies_needing_enrichment(db_conn)
-        assert names == []
+        rows = _query_companies_needing_enrichment(db_conn)
+        assert rows == []
 
-    def test_returns_list_of_strings(self, db_conn: sqlite3.Connection) -> None:
-        """Return type contains plain strings, not Row objects."""
+    def test_returns_list_of_tuples_int_str(self, db_conn: sqlite3.Connection) -> None:
+        """Return type contains (int, str) tuples, not Row objects."""
         _insert_company(db_conn, "Delta Corp")
-        names = _query_companies_needing_enrichment(db_conn)
-        assert all(isinstance(n, str) for n in names)
+        rows = _query_companies_needing_enrichment(db_conn)
+        assert all(isinstance(company_id, int) and isinstance(name, str) for company_id, name in rows)
 
 
 # ---------------------------------------------------------------------------
@@ -292,7 +292,8 @@ class TestRunEnrichmentAllSucceed:
         ):
             assert mock_fn.call_count == 1, f"{source} not called once"
             args, _ = mock_fn.call_args
-            assert args[0] == "Alpha Corp"
+            assert isinstance(args[0], int), f"{source}: first arg should be company_id (int)"
+            assert args[1] == "Alpha Corp", f"{source}: second arg should be company_name"
 
 
 # ---------------------------------------------------------------------------
@@ -512,7 +513,7 @@ class TestRunEnrichmentMultipleCompanies:
         _insert_company(db_conn, "Beta Corp")
         _insert_company(db_conn, "Gamma Corp")
 
-        def crunchbase_alternating(name: str, conn: sqlite3.Connection) -> bool:
+        def crunchbase_alternating(company_id: int, name: str, conn: sqlite3.Connection) -> bool:
             """Succeed for Alpha and Gamma, fail for Beta."""
             return name != "Beta Corp"
 
