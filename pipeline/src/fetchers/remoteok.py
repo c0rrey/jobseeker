@@ -58,7 +58,14 @@ class RemoteOKFetcher(BaseFetcher):
             response.raise_for_status()
             
             data = response.json()
-            
+
+            if not isinstance(data, list):
+                logger.warning(
+                    "RemoteOK API returned unexpected type %s; expected list. Skipping.",
+                    type(data).__name__,
+                )
+                return []
+
             # First item is metadata, skip it
             jobs = data[1:] if len(data) > 1 else []
             
@@ -94,7 +101,7 @@ class RemoteOKFetcher(BaseFetcher):
         filtered = []
         for job in jobs:
             position = job.get("position", "").lower()
-            tags = [tag.lower() for tag in job.get("tags", [])]
+            tags = [tag.lower() for tag in job.get("tags", []) if isinstance(tag, str)]
             description = job.get("description", "").lower()
             
             # Check if any keyword matches
