@@ -75,8 +75,13 @@ class Job:
 
     @property
     def raw(self) -> Optional[dict]:
-        """Backward-compatible dict view of raw_json; returns None when raw_json is None."""
-        return json.loads(self.raw_json) if self.raw_json else None
+        """Backward-compatible dict view of raw_json; returns None when raw_json is None or invalid."""
+        if not self.raw_json:
+            return None
+        try:
+            return json.loads(self.raw_json)
+        except json.JSONDecodeError:
+            return None
 
 
 # ---------------------------------------------------------------------------
