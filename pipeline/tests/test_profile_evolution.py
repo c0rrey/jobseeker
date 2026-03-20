@@ -320,7 +320,7 @@ class TestGetFeedbackWithScores:
             "location",
             "overall",
             "role_fit",
-            "skills_gap",
+            "skills_match",
             "culture_signals",
             "growth_potential",
             "comp_alignment",
