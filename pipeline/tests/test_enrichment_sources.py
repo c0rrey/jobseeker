@@ -114,7 +114,7 @@ class TestCrunchbaseEnrich:
         mock_resp = _mock_response(json_data=self._VALID_RESPONSE)
 
         with patch("pipeline.src.enrichment.crunchbase.requests.get", return_value=mock_resp):
-            result = crunchbase_enrich("Acme Corp", db_conn)
+            result = crunchbase_enrich(1, "Acme Corp", db_conn)
 
         assert result is True
         row = _get_company(db_conn, "Acme Corp")
@@ -130,7 +130,7 @@ class TestCrunchbaseEnrich:
     ) -> None:
         """enrich() returns False when CRUNCHBASE_API_KEY is not set."""
         monkeypatch.delenv("CRUNCHBASE_API_KEY", raising=False)
-        result = crunchbase_enrich("Acme Corp", db_conn)
+        result = crunchbase_enrich(1, "Acme Corp", db_conn)
         assert result is False
 
     def test_http_error_returns_false(
@@ -141,7 +141,7 @@ class TestCrunchbaseEnrich:
         mock_resp = _mock_response(status_code=429, raise_for_status=True)
 
         with patch("pipeline.src.enrichment.crunchbase.requests.get", return_value=mock_resp):
-            result = crunchbase_enrich("Acme Corp", db_conn)
+            result = crunchbase_enrich(1, "Acme Corp", db_conn)
 
         assert result is False
 
@@ -155,7 +155,7 @@ class TestCrunchbaseEnrich:
             "pipeline.src.enrichment.crunchbase.requests.get",
             side_effect=requests.exceptions.ConnectionError("timeout"),
         ):
-            result = crunchbase_enrich("Acme Corp", db_conn)
+            result = crunchbase_enrich(1, "Acme Corp", db_conn)
 
         assert result is False
 
@@ -167,7 +167,7 @@ class TestCrunchbaseEnrich:
         mock_resp = _mock_response(json_data={"properties": {}})
 
         with patch("pipeline.src.enrichment.crunchbase.requests.get", return_value=mock_resp):
-            result = crunchbase_enrich("Acme Corp", db_conn)
+            result = crunchbase_enrich(1, "Acme Corp", db_conn)
 
         assert result is False
 
@@ -182,7 +182,7 @@ class TestCrunchbaseEnrich:
         import logging
 
         with caplog.at_level(logging.WARNING, logger="pipeline.src.enrichment.crunchbase"):
-            crunchbase_enrich("Acme Corp", db_conn)
+            crunchbase_enrich(1, "Acme Corp", db_conn)
 
         assert any("CRUNCHBASE_API_KEY" in record.message for record in caplog.records)
 
@@ -215,7 +215,7 @@ class TestGlassdoorEnrich:
         mock_resp = _mock_response(json_data=self._VALID_RESPONSE)
 
         with patch("pipeline.src.enrichment.glassdoor.requests.get", return_value=mock_resp):
-            result = glassdoor_enrich("Acme Corp", db_conn)
+            result = glassdoor_enrich(1, "Acme Corp", db_conn)
 
         assert result is True
         row = _get_company(db_conn, "Acme Corp")
@@ -229,7 +229,7 @@ class TestGlassdoorEnrich:
         """enrich() returns False when partner ID or API key is absent."""
         monkeypatch.delenv("GLASSDOOR_PARTNER_ID", raising=False)
         monkeypatch.delenv("GLASSDOOR_API_KEY", raising=False)
-        result = glassdoor_enrich("Acme Corp", db_conn)
+        result = glassdoor_enrich(1, "Acme Corp", db_conn)
         assert result is False
 
     def test_http_error_returns_false(
@@ -241,7 +241,7 @@ class TestGlassdoorEnrich:
         mock_resp = _mock_response(status_code=403, raise_for_status=True)
 
         with patch("pipeline.src.enrichment.glassdoor.requests.get", return_value=mock_resp):
-            result = glassdoor_enrich("Acme Corp", db_conn)
+            result = glassdoor_enrich(1, "Acme Corp", db_conn)
 
         assert result is False
 
@@ -256,7 +256,7 @@ class TestGlassdoorEnrich:
             "pipeline.src.enrichment.glassdoor.requests.get",
             side_effect=requests.exceptions.Timeout("timed out"),
         ):
-            result = glassdoor_enrich("Acme Corp", db_conn)
+            result = glassdoor_enrich(1, "Acme Corp", db_conn)
 
         assert result is False
 
@@ -269,7 +269,7 @@ class TestGlassdoorEnrich:
         mock_resp = _mock_response(json_data={"response": {"employers": []}})
 
         with patch("pipeline.src.enrichment.glassdoor.requests.get", return_value=mock_resp):
-            result = glassdoor_enrich("Acme Corp", db_conn)
+            result = glassdoor_enrich(1, "Acme Corp", db_conn)
 
         assert result is False
 
@@ -285,7 +285,7 @@ class TestGlassdoorEnrich:
         import logging
 
         with caplog.at_level(logging.WARNING, logger="pipeline.src.enrichment.glassdoor"):
-            glassdoor_enrich("Acme Corp", db_conn)
+            glassdoor_enrich(1, "Acme Corp", db_conn)
 
         assert len(caplog.records) > 0
 
@@ -313,23 +313,24 @@ class TestLevelsfyEnrich:
         mock_resp = _mock_response(json_data=self._VALID_RESPONSE)
 
         with patch("pipeline.src.enrichment.levelsfy.requests.get", return_value=mock_resp):
-            result = levelsfy_enrich("Acme Corp", db_conn)
+            result = levelsfy_enrich(1, "Acme Corp", db_conn)
 
         assert result is True
         row = _get_company(db_conn, "Acme Corp")
         assert row is not None
         stored = json.loads(row["crunchbase_data"])
-        assert stored["source"] == "levels.fyi"
-        assert stored["median_total_comp"] == 250000
-        assert stored["sample_size"] == 42
-        assert len(stored["levels"]) == 2
+        levelsfy_data = stored["levelsfy"]
+        assert levelsfy_data["source"] == "levels.fyi"
+        assert levelsfy_data["median_total_comp"] == 250000
+        assert levelsfy_data["sample_size"] == 42
+        assert len(levelsfy_data["levels"]) == 2
 
     def test_http_error_returns_false(self, db_conn: sqlite3.Connection) -> None:
         """enrich() returns False on HTTP error."""
         mock_resp = _mock_response(status_code=404, raise_for_status=True)
 
         with patch("pipeline.src.enrichment.levelsfy.requests.get", return_value=mock_resp):
-            result = levelsfy_enrich("Acme Corp", db_conn)
+            result = levelsfy_enrich(1, "Acme Corp", db_conn)
 
         assert result is False
 
@@ -339,7 +340,7 @@ class TestLevelsfyEnrich:
             "pipeline.src.enrichment.levelsfy.requests.get",
             side_effect=requests.exceptions.ConnectionError("refused"),
         ):
-            result = levelsfy_enrich("Acme Corp", db_conn)
+            result = levelsfy_enrich(1, "Acme Corp", db_conn)
 
         assert result is False
 
@@ -348,7 +349,7 @@ class TestLevelsfyEnrich:
         mock_resp = _mock_response(json_data={})
 
         with patch("pipeline.src.enrichment.levelsfy.requests.get", return_value=mock_resp):
-            result = levelsfy_enrich("Acme Corp", db_conn)
+            result = levelsfy_enrich(1, "Acme Corp", db_conn)
 
         assert result is False
 
@@ -362,7 +363,7 @@ class TestLevelsfyEnrich:
 
         with patch("pipeline.src.enrichment.levelsfy.requests.get", return_value=mock_resp):
             with caplog.at_level(logging.WARNING, logger="pipeline.src.enrichment.levelsfy"):
-                levelsfy_enrich("Acme Corp", db_conn)
+                levelsfy_enrich(1, "Acme Corp", db_conn)
 
         assert len(caplog.records) > 0
 
@@ -405,7 +406,7 @@ class TestStackshareEnrich:
         with patch(
             "pipeline.src.enrichment.stackshare.requests.post", return_value=mock_resp
         ):
-            result = stackshare_enrich("Acme Corp", db_conn)
+            result = stackshare_enrich(1, "Acme Corp", db_conn)
 
         assert result is True
         row = _get_company(db_conn, "Acme Corp")
@@ -421,7 +422,7 @@ class TestStackshareEnrich:
     ) -> None:
         """enrich() returns False when STACKSHARE_API_KEY is not set."""
         monkeypatch.delenv("STACKSHARE_API_KEY", raising=False)
-        result = stackshare_enrich("Acme Corp", db_conn)
+        result = stackshare_enrich(1, "Acme Corp", db_conn)
         assert result is False
 
     def test_http_error_returns_false(
@@ -434,7 +435,7 @@ class TestStackshareEnrich:
         with patch(
             "pipeline.src.enrichment.stackshare.requests.post", return_value=mock_resp
         ):
-            result = stackshare_enrich("Acme Corp", db_conn)
+            result = stackshare_enrich(1, "Acme Corp", db_conn)
 
         assert result is False
 
@@ -448,7 +449,7 @@ class TestStackshareEnrich:
             "pipeline.src.enrichment.stackshare.requests.post",
             side_effect=requests.exceptions.ConnectionError("refused"),
         ):
-            result = stackshare_enrich("Acme Corp", db_conn)
+            result = stackshare_enrich(1, "Acme Corp", db_conn)
 
         assert result is False
 
@@ -462,7 +463,7 @@ class TestStackshareEnrich:
         with patch(
             "pipeline.src.enrichment.stackshare.requests.post", return_value=mock_resp
         ):
-            result = stackshare_enrich("Acme Corp", db_conn)
+            result = stackshare_enrich(1, "Acme Corp", db_conn)
 
         assert result is False
 
@@ -478,7 +479,7 @@ class TestStackshareEnrich:
         with patch(
             "pipeline.src.enrichment.stackshare.requests.post", return_value=mock_resp
         ):
-            result = stackshare_enrich("Acme Corp", db_conn)
+            result = stackshare_enrich(1, "Acme Corp", db_conn)
 
         assert result is False
 
@@ -493,6 +494,6 @@ class TestStackshareEnrich:
         import logging
 
         with caplog.at_level(logging.WARNING, logger="pipeline.src.enrichment.stackshare"):
-            stackshare_enrich("Acme Corp", db_conn)
+            stackshare_enrich(1, "Acme Corp", db_conn)
 
         assert any("STACKSHARE_API_KEY" in record.message for record in caplog.records)
