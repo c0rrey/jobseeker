@@ -51,7 +51,7 @@ class RemoteOKFetcher(BaseFetcher):
             response = requests.get(
                 self.base_url,
                 headers={
-                    'User-Agent': 'Mozilla/5.0 (compatible; JobDigestBot/1.0; +mailto:jobs@example.com)'
+                    'User-Agent': 'Mozilla/5.0 (compatible; jseeker-crawler/2.0; +mailto:jobs@example.com)'
                 },
                 timeout=15
             )
