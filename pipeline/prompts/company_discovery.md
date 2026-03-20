@@ -58,11 +58,11 @@ Return **only** a valid JSON object. Do not wrap it in markdown fences or add an
   "ats_slug": null,
   "ats_feed_url": null,
   "scrape_strategy": {
-    "job_list_selector": "ul.jobs-list li",
-    "job_title_selector": "h3.job-title a",
-    "job_url_selector": "h3.job-title a[href]",
-    "job_location_selector": ".job-location",
-    "job_department_selector": ".job-department",
+    "job_container": "ul.jobs-list li",
+    "title": "h3.job-title a",
+    "url": "h3.job-title a[href]",
+    "location": ".job-location",
+    "description": ".job-department",
     "url_base": "https://example.com",
     "url_patterns": ["https://example.com/careers/", "https://example.com/jobs/"],
     "pagination": {
@@ -88,11 +88,11 @@ Return **only** a valid JSON object. Do not wrap it in markdown fences or add an
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `job_list_selector` | string | CSS selector for the repeating container of a single job listing. |
-| `job_title_selector` | string | CSS selector (relative to job container) for the job title text or anchor. |
-| `job_url_selector` | string | CSS selector (relative to job container) for the link to the job detail page. |
-| `job_location_selector` | string or null | CSS selector for the location field. Null if not present. |
-| `job_department_selector` | string or null | CSS selector for the department/team field. Null if not present. |
+| `job_container` | string | CSS selector for the repeating container of a single job listing. |
+| `title` | string | CSS selector (relative to job container) for the job title text or anchor. |
+| `url` | string | CSS selector (relative to job container) for the link to the job detail page. |
+| `location` | string or null | CSS selector for the location field. Null if not present. |
+| `description` | string or null | CSS selector for the department/team field. Null if not present. |
 | `url_base` | string | Base URL to prepend to relative job URLs (e.g. `https://example.com`). |
 | `url_patterns` | list[string] | Known URL prefixes for job detail pages, used to validate extracted URLs. |
 | `pagination` | object | Pagination strategy: `type` is one of `"none"`, `"next_button"`, `"page_param"`, `"infinite_scroll"`. `next_selector` is the CSS selector for the "next" button (null when type is not `"next_button"`). |
