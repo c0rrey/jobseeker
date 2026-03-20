@@ -187,6 +187,8 @@ def is_allowed_location(job: Job) -> bool:
     
     # Check for Florida - state name or abbreviation
     florida_keywords = ["florida", " fl ", " fl,", ",fl"]
+    if location_lower.endswith(" fl") or location_lower.endswith(",fl"):
+        return True
     if any(keyword in location_lower for keyword in florida_keywords):
         return True
     
