@@ -9,6 +9,14 @@
  */
 
 import { getDb } from "@/lib/db";
+import type {
+  Job,
+  ScoreDimension,
+  Company,
+  Feedback,
+  ProfileSnapshot,
+  ProfileSuggestion,
+} from "@/lib/types";
 
 // ---------------------------------------------------------------------------
 // Dashboard queries (seek-18)
@@ -259,4 +267,233 @@ export function getCompanyNames(): string[] {
     )
     .all()
     .map((r) => r.company);
+}
+
+// ---------------------------------------------------------------------------
+// Job detail queries (seek-20)
+// ---------------------------------------------------------------------------
+
+/**
+ * Returns a single job row by id, or null if not found.
+ */
+export function getJobById(id: number): Job | null {
+  const db = getDb();
+  return (
+    db.prepare<[number], Job>("SELECT * FROM jobs WHERE id = ?").get(id) ?? null
+  );
+}
+
+/**
+ * Returns the most recent pass=2 score_dimensions row for a job, or null.
+ */
+export function getScoreDimensionForJob(jobId: number): ScoreDimension | null {
+  const db = getDb();
+  return (
+    db
+      .prepare<[number], ScoreDimension>(
+        "SELECT * FROM score_dimensions WHERE job_id = ? AND pass = 2 ORDER BY scored_at DESC LIMIT 1"
+      )
+      .get(jobId) ?? null
+  );
+}
+
+/**
+ * Returns the company record linked to a job's company_id, or null.
+ */
+export function getCompanyById(id: number): Company | null {
+  const db = getDb();
+  return (
+    db
+      .prepare<[number], Company>("SELECT * FROM companies WHERE id = ?")
+      .get(id) ?? null
+  );
+}
+
+/**
+ * Returns the most recent feedback for a job, or null.
+ */
+export function getLatestFeedbackForJob(jobId: number): Feedback | null {
+  const db = getDb();
+  return (
+    db
+      .prepare<[number], Feedback>(
+        "SELECT * FROM feedback WHERE job_id = ? ORDER BY created_at DESC LIMIT 1"
+      )
+      .get(jobId) ?? null
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Company queries (seek-21)
+// ---------------------------------------------------------------------------
+
+export interface CompanyRow {
+  id: number;
+  name: string;
+  domain: string | null;
+  career_page_url: string | null;
+  ats_platform: string | null;
+  size_range: string | null;
+  industry: string | null;
+  funding_stage: string | null;
+  glassdoor_rating: number | null;
+  enriched_at: string | null;
+  is_target: number;
+  created_at: string;
+  job_count: number;
+  crawl_status: string | null; // latest career_page_configs.status or null
+}
+
+/**
+ * Returns all companies with their job count and latest career page crawl status.
+ * Ordered by is_target DESC then name ASC.
+ */
+export function getCompanyList(): CompanyRow[] {
+  const db = getDb();
+  return db
+    .prepare<[], CompanyRow>(
+      `SELECT
+        c.id,
+        c.name,
+        c.domain,
+        c.career_page_url,
+        c.ats_platform,
+        c.size_range,
+        c.industry,
+        c.funding_stage,
+        c.glassdoor_rating,
+        c.enriched_at,
+        c.is_target,
+        c.created_at,
+        COUNT(j.id) AS job_count,
+        (
+          SELECT cpc.status
+          FROM career_page_configs cpc
+          WHERE cpc.company_id = c.id
+          ORDER BY cpc.created_at DESC
+          LIMIT 1
+        ) AS crawl_status
+      FROM companies c
+      LEFT JOIN jobs j ON j.company_id = c.id
+      GROUP BY c.id
+      ORDER BY c.is_target DESC, c.name ASC`
+    )
+    .all();
+}
+
+// ---------------------------------------------------------------------------
+// Profile / suggestion queries (seek-22)
+// ---------------------------------------------------------------------------
+
+/**
+ * Returns the most recent profile snapshot row, or null if none exists.
+ */
+export function getLatestProfileSnapshot(): ProfileSnapshot | null {
+  const db = getDb();
+  return (
+    db
+      .prepare<[], ProfileSnapshot>(
+        "SELECT * FROM profile_snapshots ORDER BY created_at DESC LIMIT 1"
+      )
+      .get() ?? null
+  );
+}
+
+/**
+ * Returns all profile suggestions ordered by created_at DESC.
+ * Pending suggestions appear first (via status ordering).
+ */
+export function getProfileSuggestions(): ProfileSuggestion[] {
+  const db = getDb();
+  return db
+    .prepare<[], ProfileSuggestion>(
+      `SELECT * FROM profile_suggestions
+       ORDER BY
+         CASE status WHEN 'pending' THEN 0 WHEN 'approved' THEN 1 ELSE 2 END,
+         created_at DESC`
+    )
+    .all();
+}
+
+// ---------------------------------------------------------------------------
+// Feedback history queries (seek-23)
+// ---------------------------------------------------------------------------
+
+export interface FeedbackRow {
+  id: number;
+  job_id: number;
+  signal: "thumbs_up" | "thumbs_down";
+  note: string | null;
+  created_at: string;
+  job_title: string;
+  job_company: string;
+  overall: number | null;
+}
+
+export type FeedbackSignalFilter = "all" | "thumbs_up" | "thumbs_down";
+
+/**
+ * Returns feedback entries joined with job title, company, and overall score.
+ * Ordered newest first. Optionally filtered by signal type.
+ */
+export function getFeedbackHistory(
+  signal: FeedbackSignalFilter = "all"
+): FeedbackRow[] {
+  const db = getDb();
+
+  const whereClause =
+    signal === "thumbs_up"
+      ? "WHERE f.signal = 'thumbs_up'"
+      : signal === "thumbs_down"
+        ? "WHERE f.signal = 'thumbs_down'"
+        : "";
+
+  return db
+    .prepare<[], FeedbackRow>(
+      `SELECT
+        f.id,
+        f.job_id,
+        f.signal,
+        f.note,
+        f.created_at,
+        j.title AS job_title,
+        j.company AS job_company,
+        sd.overall
+      FROM feedback f
+      INNER JOIN jobs j ON j.id = f.job_id
+      LEFT JOIN score_dimensions sd ON sd.job_id = f.job_id AND sd.pass = 2
+      ${whereClause}
+      ORDER BY f.created_at DESC`
+    )
+    .all();
+}
+
+/**
+ * Returns counts of all feedback, thumbs_up, and thumbs_down.
+ */
+export interface FeedbackCounts {
+  total: number;
+  thumbs_up: number;
+  thumbs_down: number;
+}
+
+export function getFeedbackCounts(): FeedbackCounts {
+  const db = getDb();
+  const row = db
+    .prepare<
+      [],
+      { total: number; thumbs_up: number; thumbs_down: number }
+    >(
+      `SELECT
+        COUNT(*) AS total,
+        SUM(CASE WHEN signal = 'thumbs_up' THEN 1 ELSE 0 END) AS thumbs_up,
+        SUM(CASE WHEN signal = 'thumbs_down' THEN 1 ELSE 0 END) AS thumbs_down
+      FROM feedback`
+    )
+    .get();
+  return {
+    total: row?.total ?? 0,
+    thumbs_up: row?.thumbs_up ?? 0,
+    thumbs_down: row?.thumbs_down ?? 0,
+  };
 }
