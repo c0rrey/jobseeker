@@ -6,16 +6,17 @@ Applies multiple filters:
 2. Location restrictions (remote or Tampa/Orlando area only)
 3. Job age (filter out old postings)
 4. Title restrictions (no intern roles)
+
+V2 addition: run_prefilter(db_connection) reads unscored jobs from the
+database and marks filtered-out jobs by inserting a score_dimensions
+sentinel row (pass=0, overall=-1) so downstream scoring stages skip them.
 """
 
-import sys
-from datetime import datetime, timedelta
-from pathlib import Path
+import sqlite3
+from datetime import datetime
+from typing import Optional
 
-# Add project root so we can import config
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-
-from config.settings import load_profile, load_red_flags
+from pipeline.config.settings import load_profile, load_red_flags
 
 from .models import Job
 
@@ -246,5 +247,111 @@ def filter_jobs(jobs: list[Job]) -> list[Job]:
     # Filter 6: Location filtering
     jobs = [j for j in jobs if is_allowed_location(j)]
     print(f"  After location filter: {len(jobs)}/{initial_count} jobs")
-    
+
     return jobs
+
+
+def _row_to_job(row: sqlite3.Row) -> Job:
+    """Convert a sqlite3.Row from the jobs table into a Job dataclass.
+
+    Args:
+        row: A row from ``SELECT * FROM jobs``.
+
+    Returns:
+        A Job dataclass populated from the row fields.
+    """
+    return Job(
+        title=row["title"],
+        company=row["company"],
+        url=row["url"],
+        source=row["source"],
+        source_type=row["source_type"],
+        description=row["description"],
+        location=row["location"],
+        salary_min=row["salary_min"],
+        salary_max=row["salary_max"],
+        posted_at=row["posted_at"],
+        db_id=row["id"],
+        company_id=row["company_id"],
+        ats_platform=row["ats_platform"],
+        dedup_hash=row["dedup_hash"],
+        external_id=row["external_id"],
+        raw_json=row["raw_json"],
+    )
+
+
+def run_prefilter(db_connection: sqlite3.Connection) -> dict[str, int]:
+    """Read unscored jobs from the database and mark pre-filtered jobs.
+
+    Queries jobs that have no entry in ``score_dimensions`` (i.e. have not
+    been processed by any pipeline stage yet) and applies four deterministic
+    filters in order:
+
+    1. Red flag keyword/phrase check (``should_filter``)
+    2. Salary minimum check (``meets_salary_requirement``)
+    3. Intern/internship/co-op title check (``is_intern_role``)
+    4. Posting age check (``is_too_old``)
+
+    Jobs that fail any filter are marked by inserting a sentinel row into
+    ``score_dimensions`` with ``pass=0`` and ``overall=-1``.  Downstream
+    stages skip jobs where such a sentinel exists.
+
+    Jobs that pass all filters are left untouched so the scoring stages
+    process them normally.
+
+    Args:
+        db_connection: An open SQLite connection with ``row_factory`` set to
+            ``sqlite3.Row`` (as returned by
+            ``pipeline.src.database.get_connection``).
+
+    Returns:
+        A dict with keys ``"examined"``, ``"filtered"``, and ``"passed"``
+        reporting how many jobs were processed and what the outcome was.
+    """
+    profile = load_profile()
+    red_flags = load_red_flags()
+    max_age_days: int = profile.get("max_job_age_days", 90)
+    min_salary: int = profile.get("salary_min", 100000)
+
+    # Fetch jobs with no score_dimensions entry of any pass.
+    unscored_rows = db_connection.execute(
+        """
+        SELECT j.*
+        FROM jobs j
+        LEFT JOIN score_dimensions sd ON sd.job_id = j.id
+        WHERE sd.job_id IS NULL
+        """
+    ).fetchall()
+
+    examined = len(unscored_rows)
+    filtered = 0
+    passed = 0
+
+    for row in unscored_rows:
+        job = _row_to_job(row)
+
+        reason: Optional[str] = None
+        if should_filter(job, red_flags):
+            reason = "red_flag"
+        elif not meets_salary_requirement(job, min_salary):
+            reason = "salary"
+        elif is_intern_role(job):
+            reason = "intern"
+        elif is_too_old(job, max_age_days):
+            reason = "too_old"
+
+        if reason is not None:
+            db_connection.execute(
+                """
+                INSERT OR IGNORE INTO score_dimensions (job_id, pass, overall, reasoning)
+                VALUES (?, 0, -1, ?)
+                """,
+                (job.db_id, reason),
+            )
+            filtered += 1
+        else:
+            passed += 1
+
+    db_connection.commit()
+
+    return {"examined": examined, "filtered": filtered, "passed": passed}
