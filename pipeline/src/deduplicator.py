@@ -51,6 +51,49 @@ def compute_dedup_hash(title: str, company: str) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Internal helpers
+# ---------------------------------------------------------------------------
+
+_CHUNK_SIZE = 500
+
+
+def _fetch_existing_urls(conn: sqlite3.Connection, urls: list[str]) -> set[str]:
+    """Return the subset of *urls* that already exist in the ``jobs`` table.
+
+    Queries in chunks of :data:`_CHUNK_SIZE` to stay well under SQLite's
+    ``SQLITE_MAX_VARIABLE_NUMBER`` limit (default 999 on many builds).
+    """
+    existing: set[str] = set()
+    for i in range(0, len(urls), _CHUNK_SIZE):
+        chunk = urls[i : i + _CHUNK_SIZE]
+        placeholders = ",".join("?" * len(chunk))
+        rows = conn.execute(
+            f"SELECT url FROM jobs WHERE url IN ({placeholders});",
+            chunk,
+        ).fetchall()
+        existing.update(row[0] for row in rows)
+    return existing
+
+
+def _fetch_existing_hashes(conn: sqlite3.Connection, hashes: list[str]) -> dict[str, str]:
+    """Return a mapping of ``dedup_hash → url`` for hashes already in the DB.
+
+    Queries in chunks of :data:`_CHUNK_SIZE` to stay well under SQLite's
+    ``SQLITE_MAX_VARIABLE_NUMBER`` limit (default 999 on many builds).
+    """
+    existing: dict[str, str] = {}
+    for i in range(0, len(hashes), _CHUNK_SIZE):
+        chunk = hashes[i : i + _CHUNK_SIZE]
+        placeholders = ",".join("?" * len(chunk))
+        rows = conn.execute(
+            f"SELECT dedup_hash, url FROM jobs WHERE dedup_hash IN ({placeholders});",
+            chunk,
+        ).fetchall()
+        existing.update({row[0]: row[1] for row in rows})
+    return existing
+
+
+# ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
 
@@ -100,12 +143,8 @@ def deduplicate_and_insert(
     incoming_urls = [job.url for job, _ in hashed]
 
     # Fetch only the rows whose URL appears in the incoming batch — O(batch).
-    placeholders = ",".join("?" * len(incoming_urls))
-    existing_url_rows = conn.execute(
-        f"SELECT url FROM jobs WHERE url IN ({placeholders});",
-        incoming_urls,
-    ).fetchall()
-    existing_urls: set[str] = {row[0] for row in existing_url_rows}
+    # Chunked to avoid SQLite SQLITE_MAX_VARIABLE_NUMBER on large batches.
+    existing_urls: set[str] = _fetch_existing_urls(conn, incoming_urls)
 
     new_jobs: list[tuple[Job, str]] = []
     update_urls: list[tuple[str, str]] = []  # (now, url)
@@ -131,12 +170,8 @@ def deduplicate_and_insert(
     # ------------------------------------------------------------------
     if new_jobs:
         new_hashes = [dhash for _, dhash in new_jobs]
-        hash_placeholders = ",".join("?" * len(new_hashes))
-        existing_hash_rows = conn.execute(
-            f"SELECT dedup_hash, url FROM jobs WHERE dedup_hash IN ({hash_placeholders});",
-            new_hashes,
-        ).fetchall()
-        existing_hash_map: dict[str, str] = {row[0]: row[1] for row in existing_hash_rows}
+        # Chunked to avoid SQLite SQLITE_MAX_VARIABLE_NUMBER on large batches.
+        existing_hash_map: dict[str, str] = _fetch_existing_hashes(conn, new_hashes)
 
         for job, dhash in new_jobs:
             if dhash in existing_hash_map:
