@@ -2,9 +2,9 @@
 Tests for pipeline/src/company_discovery.py.
 
 Covers:
-- discover_company() with explicit career_url (no SerpAPI call)
-- discover_company() with no career_url triggers SerpAPI search
-- Missing SERPAPI_KEY logs warning and returns None
+- discover_company() with explicit career_url (skips Glassdoor API call)
+- discover_company() with no career_url triggers Glassdoor/RapidAPI lookup
+- Missing RAPIDAPI_KEY logs warning and returns None
 - ATS-detected pages create career_page_configs row and update companies.ats_platform
 - Non-ATS pages store scrape_strategy JSON in career_page_configs
 - rediscover_broken() re-runs discovery and updates status
@@ -31,7 +31,6 @@ from pipeline.src.company_discovery import (
     rediscover_broken,
 )
 from pipeline.src.database import get_connection, init_db
-from pipeline.src.models import CareerPageConfig
 
 
 # ---------------------------------------------------------------------------
@@ -122,55 +121,88 @@ CUSTOM_HTML = """
 
 
 class TestResolveCareerUrl:
-    def test_returns_first_organic_result_url(self) -> None:
-        mock_response = MagicMock()
-        mock_response.json.return_value = {
-            "organic_results": [
-                {"link": "https://acme.com/careers"},
-                {"link": "https://linkedin.com/jobs/acme"},
-            ]
-        }
-        mock_response.raise_for_status = MagicMock()
+    """Tests for the Glassdoor-based _resolve_career_url implementation."""
 
-        with patch("pipeline.src.company_discovery.get_serpapi_key", return_value="fake-key"), \
-             patch("pipeline.src.company_discovery.requests.get", return_value=mock_response):
-            url = _resolve_career_url("Acme Corp")
+    def test_returns_probed_career_url_when_glassdoor_has_website(
+        self, conn: sqlite3.Connection
+    ) -> None:
+        """Returns the first live career URL found by probing the Glassdoor website domain."""
+        glassdoor_data = {"name": "Acme Corp", "website": "https://acme.com"}
+        probe_response = MagicMock()
+        probe_response.status_code = 200
+
+        with patch(
+            "pipeline.src.company_discovery._fetch_glassdoor_data",
+            return_value=glassdoor_data,
+        ), patch(
+            "pipeline.src.company_discovery._probe_career_url",
+            return_value="https://acme.com/careers",
+        ), patch(
+            "pipeline.src.enrichment.glassdoor_rapidapi._load_cache",
+            return_value={},
+        ):
+            url, metadata = _resolve_career_url("Acme Corp", conn, "fake-rapidapi-key")
 
         assert url == "https://acme.com/careers"
+        assert metadata is not None
+        assert metadata["name"] == "Acme Corp"
 
-    def test_returns_none_when_serpapi_key_missing(self, caplog: pytest.LogCaptureFixture) -> None:
-        import logging
+    def test_returns_none_url_when_glassdoor_has_no_website(
+        self, conn: sqlite3.Connection
+    ) -> None:
+        """Returns (None, metadata) when Glassdoor data lacks a website field."""
+        glassdoor_data = {"name": "No Website Corp", "website": None}
+
         with patch(
-            "pipeline.src.company_discovery.get_serpapi_key",
-            side_effect=ValueError("SERPAPI_KEY not set"),
-        ), caplog.at_level(logging.WARNING, logger="pipeline.src.company_discovery"):
-            url = _resolve_career_url("Acme Corp")
+            "pipeline.src.company_discovery._fetch_glassdoor_data",
+            return_value=glassdoor_data,
+        ), patch(
+            "pipeline.src.enrichment.glassdoor_rapidapi._load_cache",
+            return_value={},
+        ):
+            url, metadata = _resolve_career_url("No Website Corp", conn, "fake-rapidapi-key")
 
         assert url is None
-        assert "SERPAPI_KEY" in caplog.text
+        assert metadata is not None
 
-    def test_returns_none_on_empty_organic_results(self) -> None:
-        mock_response = MagicMock()
-        mock_response.json.return_value = {"organic_results": []}
-        mock_response.raise_for_status = MagicMock()
-
-        with patch("pipeline.src.company_discovery.get_serpapi_key", return_value="fake-key"), \
-             patch("pipeline.src.company_discovery.requests.get", return_value=mock_response):
-            url = _resolve_career_url("NoResults Corp")
-
-        assert url is None
-
-    def test_returns_none_on_request_exception(self) -> None:
-        import requests as _req
-
-        with patch("pipeline.src.company_discovery.get_serpapi_key", return_value="fake-key"), \
-             patch(
-                 "pipeline.src.company_discovery.requests.get",
-                 side_effect=_req.RequestException("timeout"),
-             ):
-            url = _resolve_career_url("Broken Corp")
+    def test_returns_none_none_when_glassdoor_api_fails(
+        self, conn: sqlite3.Connection
+    ) -> None:
+        """Returns (None, None) when the Glassdoor API call fails entirely."""
+        with patch(
+            "pipeline.src.company_discovery._fetch_glassdoor_data",
+            return_value=None,
+        ), patch(
+            "pipeline.src.enrichment.glassdoor_rapidapi._load_cache",
+            return_value={},
+        ):
+            url, metadata = _resolve_career_url("Ghost Corp", conn, "fake-rapidapi-key")
 
         assert url is None
+        assert metadata is None
+
+    def test_uses_cache_hit_without_api_call(
+        self, conn: sqlite3.Connection
+    ) -> None:
+        """Uses Glassdoor cache data and skips the live API call on a cache hit."""
+        cached_entry = {
+            "status": "OK",
+            "data": {"name": "Cached Corp", "website": "https://cached.com"},
+        }
+
+        with patch(
+            "pipeline.src.enrichment.glassdoor_rapidapi._load_cache",
+            return_value={"Cached Corp": cached_entry},
+        ), patch(
+            "pipeline.src.company_discovery._fetch_glassdoor_data"
+        ) as mock_api, patch(
+            "pipeline.src.company_discovery._probe_career_url",
+            return_value="https://cached.com/careers",
+        ):
+            url, metadata = _resolve_career_url("Cached Corp", conn, "fake-rapidapi-key")
+
+        mock_api.assert_not_called()
+        assert url == "https://cached.com/careers"
 
 
 # ---------------------------------------------------------------------------
@@ -388,125 +420,187 @@ class TestPersistDiscovery:
 
 
 class TestDiscoverCompany:
-    def test_ats_page_returns_career_page_config(self, conn: sqlite3.Connection) -> None:
+    def test_ats_page_returns_company_record(
+        self, conn: sqlite3.Connection, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """ATS page discovery returns a CompanyRecord with the resolved career URL."""
+        monkeypatch.setenv("RAPIDAPI_KEY", "fake-rapidapi-key")
+        glassdoor_data = {"name": "Acme Corp", "website": "https://acme.com", "rating": 4.5}
+
         mock_html_response = MagicMock()
         mock_html_response.text = GREENHOUSE_HTML
         mock_html_response.raise_for_status = MagicMock()
 
-        with patch("pipeline.src.company_discovery.requests.get", return_value=mock_html_response), \
-             patch(
-                 "pipeline.src.company_discovery._call_llm",
-                 return_value=json.dumps(ATS_LLM_RESPONSE),
-             ):
-            config = discover_company(
+        with patch(
+            "pipeline.src.company_discovery._fetch_glassdoor_data",
+            return_value=glassdoor_data,
+        ), patch(
+            "pipeline.src.enrichment.glassdoor_rapidapi._load_cache",
+            return_value={},
+        ), patch(
+            "pipeline.src.company_discovery.requests.get",
+            return_value=mock_html_response,
+        ), patch(
+            "pipeline.src.company_discovery._call_llm",
+            return_value=json.dumps(ATS_LLM_RESPONSE),
+        ):
+            result = discover_company(
                 company_name="Acme Corp",
                 db_connection=conn,
                 career_url="https://acme.com/careers",
             )
 
-        assert isinstance(config, CareerPageConfig)
-        assert config.status == "active"
-        assert config.discovery_method == "auto"
-        assert config.url == "https://boards.greenhouse.io/acmecorp"
+        from pipeline.src.company_discovery import CompanyRecord
+        assert isinstance(result, CompanyRecord)
+        assert result.career_page_url == "https://acme.com/careers"
+        # Verify the career_page_configs row was written with the ATS feed URL
+        row = conn.execute(
+            "SELECT url, status, discovery_method FROM career_page_configs"
+            " WHERE company_id = ?", (result.company_id,)
+        ).fetchone()
+        assert row is not None
+        assert row["url"] == "https://boards.greenhouse.io/acmecorp"
+        assert row["status"] == "active"
+        assert row["discovery_method"] == "auto"
 
-    def test_non_ats_page_stores_scrape_strategy(self, conn: sqlite3.Connection) -> None:
+    def test_non_ats_page_stores_scrape_strategy(
+        self, conn: sqlite3.Connection, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("RAPIDAPI_KEY", "fake-rapidapi-key")
+        glassdoor_data = {"name": "Acme Corp", "website": "https://acme.com", "rating": 3.8}
+
         mock_html_response = MagicMock()
         mock_html_response.text = CUSTOM_HTML
         mock_html_response.raise_for_status = MagicMock()
 
-        with patch("pipeline.src.company_discovery.requests.get", return_value=mock_html_response), \
-             patch(
-                 "pipeline.src.company_discovery._call_llm",
-                 return_value=json.dumps(CUSTOM_LLM_RESPONSE),
-             ):
-            config = discover_company(
+        with patch(
+            "pipeline.src.company_discovery._fetch_glassdoor_data",
+            return_value=glassdoor_data,
+        ), patch(
+            "pipeline.src.enrichment.glassdoor_rapidapi._load_cache",
+            return_value={},
+        ), patch(
+            "pipeline.src.company_discovery.requests.get",
+            return_value=mock_html_response,
+        ), patch(
+            "pipeline.src.company_discovery._call_llm",
+            return_value=json.dumps(CUSTOM_LLM_RESPONSE),
+        ):
+            result = discover_company(
                 company_name="Acme Corp",
                 db_connection=conn,
                 career_url="https://acme.com/careers",
             )
 
-        assert config is not None
-        assert config.scrape_strategy is not None
-        parsed = json.loads(config.scrape_strategy)
+        assert result is not None
+        row = conn.execute(
+            "SELECT scrape_strategy FROM career_page_configs WHERE company_id = ?",
+            (result.company_id,),
+        ).fetchone()
+        assert row is not None
+        parsed = json.loads(row["scrape_strategy"])
         assert parsed["job_list_selector"] == "ul.jobs li"
 
-    def test_missing_serpapi_key_returns_none(
-        self, conn: sqlite3.Connection, caplog: pytest.LogCaptureFixture
+    def test_missing_rapidapi_key_returns_none(
+        self, conn: sqlite3.Connection, caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
     ) -> None:
+        """When RAPIDAPI_KEY is absent and no career_url supplied, returns None and logs a warning."""
         import logging
-        with patch(
-            "pipeline.src.company_discovery.get_serpapi_key",
-            side_effect=ValueError("SERPAPI_KEY not set"),
-        ), caplog.at_level(logging.WARNING, logger="pipeline.src.company_discovery"):
+        monkeypatch.delenv("RAPIDAPI_KEY", raising=False)
+        with caplog.at_level(logging.WARNING, logger="pipeline.src.company_discovery"):
             config = discover_company(
                 company_name="Acme Corp",
                 db_connection=conn,
-                # no career_url — forces SerpAPI resolution
+                # no career_url — requires Glassdoor lookup which needs RAPIDAPI_KEY
             )
 
         assert config is None
-        assert "SERPAPI_KEY" in caplog.text
+        assert "RAPIDAPI_KEY" in caplog.text
 
-    def test_uses_serpapi_when_career_url_is_none(self, conn: sqlite3.Connection) -> None:
-        """When career_url is None, SerpAPI is invoked to find the URL."""
-        serp_response = MagicMock()
-        serp_response.json.return_value = {
-            "organic_results": [{"link": "https://acme.com/careers"}]
-        }
-        serp_response.raise_for_status = MagicMock()
+    def test_uses_glassdoor_when_career_url_is_none(
+        self, conn: sqlite3.Connection, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """When career_url is None, Glassdoor/RapidAPI is used to discover the company."""
+        monkeypatch.setenv("RAPIDAPI_KEY", "fake-rapidapi-key")
+        glassdoor_data = {"name": "Acme Corp", "website": "https://acme.com", "rating": 4.2}
 
         html_response = MagicMock()
         html_response.text = GREENHOUSE_HTML
         html_response.raise_for_status = MagicMock()
+        html_response.status_code = 200
 
-        call_count = {"n": 0}
-
-        def mock_get(url: str, **kwargs: Any) -> MagicMock:
-            call_count["n"] += 1
-            if "serpapi" in url:
-                return serp_response
-            return html_response
-
-        with patch("pipeline.src.company_discovery.get_serpapi_key", return_value="fake-key"), \
-             patch("pipeline.src.company_discovery.requests.get", side_effect=mock_get), \
-             patch(
-                 "pipeline.src.company_discovery._call_llm",
-                 return_value=json.dumps(ATS_LLM_RESPONSE),
-             ):
-            config = discover_company(
+        with patch(
+            "pipeline.src.company_discovery._fetch_glassdoor_data",
+            return_value=glassdoor_data,
+        ), patch(
+            "pipeline.src.enrichment.glassdoor_rapidapi._load_cache",
+            return_value={},
+        ), patch(
+            "pipeline.src.company_discovery._probe_career_url",
+            return_value="https://acme.com/careers",
+        ), patch(
+            "pipeline.src.company_discovery.requests.get",
+            return_value=html_response,
+        ), patch(
+            "pipeline.src.company_discovery._call_llm",
+            return_value=json.dumps(ATS_LLM_RESPONSE),
+        ):
+            result = discover_company(
                 company_name="Acme Corp",
                 db_connection=conn,
+                # no career_url — triggers Glassdoor-based resolution
             )
 
-        assert config is not None
-        # SerpAPI + HTML fetch = 2 calls
-        assert call_count["n"] == 2
+        assert result is not None
+        assert result.career_page_url == "https://acme.com/careers"
 
-    def test_returns_none_when_html_fetch_fails(self, conn: sqlite3.Connection) -> None:
+    def test_returns_company_record_when_html_fetch_fails(
+        self, conn: sqlite3.Connection, seeded_company: int
+    ) -> None:
+        """When HTML fetch fails for an existing company, returns CompanyRecord with no career URL update."""
         import requests as _req
 
+        # seeded_company already exists — skips the RAPIDAPI_KEY check and goes
+        # directly to the existing-row path.  With career_url provided, it runs
+        # the HTML/LLM phases; a failed HTML fetch returns the existing record.
         with patch(
             "pipeline.src.company_discovery.requests.get",
             side_effect=_req.RequestException("timeout"),
         ):
-            config = discover_company(
+            result = discover_company(
                 company_name="Acme Corp",
                 db_connection=conn,
                 career_url="https://acme.com/careers",
             )
 
-        assert config is None
+        # HTML fetch failed — returns the existing CompanyRecord without new career URL
+        from pipeline.src.company_discovery import CompanyRecord
+        assert isinstance(result, CompanyRecord)
+        assert result.company_id == seeded_company
 
-    def test_creates_company_row_if_not_exists(self, conn: sqlite3.Connection) -> None:
+    def test_creates_company_row_if_not_exists(
+        self, conn: sqlite3.Connection, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("RAPIDAPI_KEY", "fake-rapidapi-key")
+        glassdoor_data = {"name": "Brand New Corp", "website": "https://brandnew.com", "rating": 3.9}
+
         mock_html_response = MagicMock()
         mock_html_response.text = GREENHOUSE_HTML
         mock_html_response.raise_for_status = MagicMock()
 
-        with patch("pipeline.src.company_discovery.requests.get", return_value=mock_html_response), \
-             patch(
-                 "pipeline.src.company_discovery._call_llm",
-                 return_value=json.dumps(ATS_LLM_RESPONSE),
-             ):
+        with patch(
+            "pipeline.src.company_discovery._fetch_glassdoor_data",
+            return_value=glassdoor_data,
+        ), patch(
+            "pipeline.src.enrichment.glassdoor_rapidapi._load_cache",
+            return_value={},
+        ), patch(
+            "pipeline.src.company_discovery.requests.get",
+            return_value=mock_html_response,
+        ), patch(
+            "pipeline.src.company_discovery._call_llm",
+            return_value=json.dumps(ATS_LLM_RESPONSE),
+        ):
             discover_company(
                 company_name="Brand New Corp",
                 db_connection=conn,
@@ -518,16 +612,29 @@ class TestDiscoverCompany:
         ).fetchone()
         assert row is not None
 
-    def test_ats_platform_set_on_companies_table(self, conn: sqlite3.Connection) -> None:
+    def test_ats_platform_set_on_companies_table(
+        self, conn: sqlite3.Connection, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("RAPIDAPI_KEY", "fake-rapidapi-key")
+        glassdoor_data = {"name": "Acme Corp", "website": "https://acme.com", "rating": 4.5}
+
         mock_html_response = MagicMock()
         mock_html_response.text = GREENHOUSE_HTML
         mock_html_response.raise_for_status = MagicMock()
 
-        with patch("pipeline.src.company_discovery.requests.get", return_value=mock_html_response), \
-             patch(
-                 "pipeline.src.company_discovery._call_llm",
-                 return_value=json.dumps(ATS_LLM_RESPONSE),
-             ):
+        with patch(
+            "pipeline.src.company_discovery._fetch_glassdoor_data",
+            return_value=glassdoor_data,
+        ), patch(
+            "pipeline.src.enrichment.glassdoor_rapidapi._load_cache",
+            return_value={},
+        ), patch(
+            "pipeline.src.company_discovery.requests.get",
+            return_value=mock_html_response,
+        ), patch(
+            "pipeline.src.company_discovery._call_llm",
+            return_value=json.dumps(ATS_LLM_RESPONSE),
+        ):
             discover_company(
                 company_name="Acme Corp",
                 db_connection=conn,

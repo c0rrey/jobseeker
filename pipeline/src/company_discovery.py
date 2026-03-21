@@ -279,8 +279,8 @@ def _resolve_career_url(
 ) -> tuple[Optional[str], Optional[dict[str, Any]]]:
     """Look up the company on Glassdoor and probe for a career URL.
 
-    This replaces the former SerpAPI-based implementation.  No SerpAPI
-    calls are made; ``get_serpapi_key()`` is not called.
+    Uses the Glassdoor RapidAPI endpoint exclusively via
+    :func:`_fetch_glassdoor_data`.
 
     Steps:
         1. Check the pre-fetched Glassdoor cache (no API call required).
