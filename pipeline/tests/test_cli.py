@@ -32,12 +32,14 @@ from pipeline.cli import (
     _build_parser,
     _print_discover_summary,
     _print_enrich_summary,
+    _print_fetch_descriptions_summary,
     _print_fetch_summary,
     _print_prefilter_summary,
     main,
     run_discover,
     run_enrich,
     run_fetch,
+    run_fetch_descriptions,
     run_prefilter,
 )
 from pipeline.src.duplicate_detector import DetectionSummary
@@ -64,6 +66,8 @@ _PATCH_RUN_PREFILTER = "pipeline.cli._filter_run_prefilter"
 _PATCH_DISCOVER_COMPANY = "pipeline.cli.discover_company"
 _PATCH_GET_NEW_SURVIVORS = "pipeline.cli._get_new_survivor_companies"
 _PATCH_GET_EXISTING_SURVIVORS = "pipeline.cli._get_existing_survivor_company_count"
+
+_PATCH_FETCH_DESCRIPTIONS_RUN = "pipeline.cli._fetch_descriptions_run"
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -1118,3 +1122,347 @@ class TestPrintDiscoverSummary:
         _print_discover_summary(_discover_summary(new_discovered=3, enrichment=enrichment))
         out = capsys.readouterr().out
         assert "3" in out
+
+
+# ---------------------------------------------------------------------------
+# --fetch-descriptions parser / mutual exclusion
+# ---------------------------------------------------------------------------
+
+
+class TestFetchDescriptionsParser:
+    """Parser-level tests for --fetch-descriptions."""
+
+    def test_fetch_descriptions_flag_present(self) -> None:
+        """--fetch-descriptions must be recognised by the parser."""
+        parser = _build_parser()
+        args = parser.parse_args(["--fetch-descriptions"])
+        assert args.fetch_descriptions is True
+
+    def test_fetch_descriptions_mutually_exclusive_with_fetch(self) -> None:
+        """--fetch and --fetch-descriptions cannot be combined (exit code 2)."""
+        parser = _build_parser()
+        with pytest.raises(SystemExit) as exc_info:
+            parser.parse_args(["--fetch", "--fetch-descriptions"])
+        assert exc_info.value.code == 2
+
+    def test_fetch_descriptions_mutually_exclusive_with_enrich(self) -> None:
+        """--fetch-descriptions and --enrich cannot be combined."""
+        parser = _build_parser()
+        with pytest.raises(SystemExit) as exc_info:
+            parser.parse_args(["--fetch-descriptions", "--enrich"])
+        assert exc_info.value.code == 2
+
+    def test_fetch_descriptions_mutually_exclusive_with_prefilter(self) -> None:
+        """--fetch-descriptions and --prefilter cannot be combined."""
+        parser = _build_parser()
+        with pytest.raises(SystemExit) as exc_info:
+            parser.parse_args(["--fetch-descriptions", "--prefilter"])
+        assert exc_info.value.code == 2
+
+    def test_fetch_descriptions_mutually_exclusive_with_all(self) -> None:
+        """--fetch-descriptions and --all cannot be combined."""
+        parser = _build_parser()
+        with pytest.raises(SystemExit) as exc_info:
+            parser.parse_args(["--fetch-descriptions", "--all"])
+        assert exc_info.value.code == 2
+
+
+# ---------------------------------------------------------------------------
+# _print_fetch_descriptions_summary unit tests
+# ---------------------------------------------------------------------------
+
+
+class TestPrintFetchDescriptionsSummary:
+    """Unit tests for _print_fetch_descriptions_summary."""
+
+    def test_nothing_to_fetch_when_total_zero(
+        self, capsys: pytest.CaptureFixture
+    ) -> None:
+        """When total is 0, prints 'Nothing to fetch.'."""
+        _print_fetch_descriptions_summary({"total": 0, "successful": 0, "failed": 0})
+        out = capsys.readouterr().out
+        assert "Nothing to fetch" in out
+
+    def test_prints_complete_message_when_total_nonzero(
+        self, capsys: pytest.CaptureFixture
+    ) -> None:
+        """When total > 0, prints 'Fetch-descriptions complete' with counts."""
+        _print_fetch_descriptions_summary({"total": 10, "successful": 8, "failed": 2})
+        out = capsys.readouterr().out
+        assert "Fetch-descriptions complete" in out
+        assert "10" in out
+        assert "8" in out
+        assert "2" in out
+
+    def test_complete_message_shows_all_three_counts(
+        self, capsys: pytest.CaptureFixture
+    ) -> None:
+        """Summary line must surface total, successful, and failed values."""
+        _print_fetch_descriptions_summary({"total": 5, "successful": 5, "failed": 0})
+        out = capsys.readouterr().out
+        assert "5" in out
+        assert "successful" in out
+        assert "failed" in out
+
+
+# ---------------------------------------------------------------------------
+# --fetch-descriptions standalone stage
+# ---------------------------------------------------------------------------
+
+
+class TestFetchDescriptionsStage:
+    """End-to-end tests for the standalone --fetch-descriptions stage."""
+
+    def test_run_fetch_descriptions_called(
+        self, fake_db_path: str, mock_conn: MagicMock
+    ) -> None:
+        """main(['--fetch-descriptions']) must invoke run_fetch_descriptions."""
+        fd_summary = {"total": 3, "successful": 3, "failed": 0}
+        with (
+            patch(_PATCH_INIT_DB),
+            patch(_PATCH_GET_CONNECTION, return_value=mock_conn),
+            patch(_PATCH_GET_DB_PATH, return_value=fake_db_path),
+            patch(_PATCH_FETCH_DESCRIPTIONS_RUN, return_value=fd_summary) as mock_run,
+        ):
+            result = main(["--fetch-descriptions"])
+
+        mock_run.assert_called_once_with(fake_db_path)
+        assert result == 0
+
+    def test_fetch_descriptions_summary_printed(
+        self, fake_db_path: str, mock_conn: MagicMock, capsys: pytest.CaptureFixture
+    ) -> None:
+        """A non-empty run prints 'Fetch-descriptions complete' with counts."""
+        fd_summary = {"total": 7, "successful": 6, "failed": 1}
+        with (
+            patch(_PATCH_INIT_DB),
+            patch(_PATCH_GET_CONNECTION, return_value=mock_conn),
+            patch(_PATCH_GET_DB_PATH, return_value=fake_db_path),
+            patch(_PATCH_FETCH_DESCRIPTIONS_RUN, return_value=fd_summary),
+        ):
+            main(["--fetch-descriptions"])
+
+        out = capsys.readouterr().out
+        assert "Fetch-descriptions complete" in out
+        assert "7" in out
+        assert "6" in out
+        assert "1" in out
+
+    def test_nothing_to_fetch_prints_nothing_to_fetch(
+        self, fake_db_path: str, mock_conn: MagicMock, capsys: pytest.CaptureFixture
+    ) -> None:
+        """When run() returns total=0, prints 'Nothing to fetch.' and exits 0."""
+        fd_summary = {"total": 0, "successful": 0, "failed": 0}
+        with (
+            patch(_PATCH_INIT_DB),
+            patch(_PATCH_GET_CONNECTION, return_value=mock_conn),
+            patch(_PATCH_GET_DB_PATH, return_value=fake_db_path),
+            patch(_PATCH_FETCH_DESCRIPTIONS_RUN, return_value=fd_summary),
+        ):
+            result = main(["--fetch-descriptions"])
+
+        out = capsys.readouterr().out
+        assert "Nothing to fetch" in out
+        assert result == 0
+
+    def test_fetch_descriptions_exception_returns_exit_code_1(
+        self, fake_db_path: str, mock_conn: MagicMock
+    ) -> None:
+        """An exception from run_fetch_descriptions propagates and returns exit code 1."""
+        with (
+            patch(_PATCH_INIT_DB),
+            patch(_PATCH_GET_CONNECTION, return_value=mock_conn),
+            patch(_PATCH_GET_DB_PATH, return_value=fake_db_path),
+            patch(_PATCH_FETCH_DESCRIPTIONS_RUN, side_effect=RuntimeError("DB error")),
+        ):
+            result = main(["--fetch-descriptions"])
+
+        assert result == 1
+
+    def test_run_fetch_descriptions_wrapper_delegates_to_run(
+        self, fake_db_path: str, mock_conn: MagicMock
+    ) -> None:
+        """run_fetch_descriptions() must call the underlying _fetch_descriptions_run."""
+        fd_summary = {"total": 2, "successful": 2, "failed": 0}
+        with patch(_PATCH_FETCH_DESCRIPTIONS_RUN, return_value=fd_summary) as mock_run:
+            result = run_fetch_descriptions(fake_db_path)
+
+        mock_run.assert_called_once_with(fake_db_path)
+        assert result == fd_summary
+
+
+# ---------------------------------------------------------------------------
+# --all stage: fetch-descriptions integration
+# ---------------------------------------------------------------------------
+
+
+class TestAllStageFetchDescriptions:
+    """Tests that verify fetch-descriptions is wired into --all correctly."""
+
+    def _make_all_patches(
+        self,
+        mock_conn: MagicMock,
+        fake_db_path: str,
+        fd_summary: dict[str, int] | None = None,
+        fd_side_effect: Exception | None = None,
+    ) -> tuple[Any, ...]:
+        """Return a tuple of patch context args used in --all tests."""
+        # Returned by callers to be used with contextlib.ExitStack or multiple
+        # patch() calls in a with statement.
+        return ()  # Not used directly — patches are applied inline in each test.
+
+    def test_all_four_stages_run(
+        self, fake_db_path: str, mock_conn: MagicMock
+    ) -> None:
+        """--all must run fetch, fetch-descriptions, prefilter, and enrich."""
+        fd_summary = {"total": 3, "successful": 3, "failed": 0}
+        enrich_summary = {
+            "companies_processed": 1,
+            "sources_succeeded": {},
+            "sources_failed": {},
+        }
+        pf_summary = {"examined": 5, "filtered": 1, "passed": 4}
+
+        with (
+            patch(_PATCH_INIT_DB),
+            patch(_PATCH_GET_CONNECTION, return_value=mock_conn),
+            patch(_PATCH_GET_DB_PATH, return_value=fake_db_path),
+            patch(_PATCH_ADZUNA) as mock_adzuna_cls,
+            patch(_PATCH_REMOTEOK) as mock_remoteok_cls,
+            patch(_PATCH_LINKEDIN) as mock_linkedin_cls,
+            patch(_PATCH_ATS) as mock_ats_cls,
+            patch(_PATCH_CAREER) as mock_career_cls,
+            patch(_PATCH_DEDUP, return_value=(4, 1)),
+            patch(_PATCH_FETCH_DESCRIPTIONS_RUN, return_value=fd_summary) as mock_fd,
+            patch(_PATCH_RUN_ENRICHMENT, return_value=enrich_summary) as mock_enrich,
+            patch(_PATCH_RUN_PREFILTER, return_value=pf_summary) as mock_pf,
+        ):
+            _configure_fetcher_mocks(
+                mock_adzuna_cls, mock_remoteok_cls, mock_linkedin_cls,
+                mock_ats_cls, mock_career_cls,
+            )
+            result = main(["--all"])
+
+        mock_fd.assert_called_once_with(fake_db_path)
+        mock_pf.assert_called_once()
+        mock_enrich.assert_called_once()
+        assert result == 0
+
+    def test_all_prints_four_summaries(
+        self, fake_db_path: str, mock_conn: MagicMock, capsys: pytest.CaptureFixture
+    ) -> None:
+        """--all must print summaries for all four stages."""
+        fd_summary = {"total": 4, "successful": 4, "failed": 0}
+        enrich_summary = {
+            "companies_processed": 2,
+            "sources_succeeded": {},
+            "sources_failed": {},
+        }
+        pf_summary = {"examined": 6, "filtered": 2, "passed": 4}
+
+        with (
+            patch(_PATCH_INIT_DB),
+            patch(_PATCH_GET_CONNECTION, return_value=mock_conn),
+            patch(_PATCH_GET_DB_PATH, return_value=fake_db_path),
+            patch(_PATCH_ADZUNA) as mock_adzuna_cls,
+            patch(_PATCH_REMOTEOK) as mock_remoteok_cls,
+            patch(_PATCH_LINKEDIN) as mock_linkedin_cls,
+            patch(_PATCH_ATS) as mock_ats_cls,
+            patch(_PATCH_CAREER) as mock_career_cls,
+            patch(_PATCH_DEDUP, return_value=(3, 0)),
+            patch(_PATCH_FETCH_DESCRIPTIONS_RUN, return_value=fd_summary),
+            patch(_PATCH_RUN_ENRICHMENT, return_value=enrich_summary),
+            patch(_PATCH_RUN_PREFILTER, return_value=pf_summary),
+        ):
+            _configure_fetcher_mocks(
+                mock_adzuna_cls, mock_remoteok_cls, mock_linkedin_cls,
+                mock_ats_cls, mock_career_cls,
+            )
+            main(["--all"])
+
+        out = capsys.readouterr().out
+        assert "Fetch complete" in out
+        assert "Fetch-descriptions complete" in out
+        assert "Prefilter complete" in out
+        assert "Enrich complete" in out
+
+    def test_fetch_descriptions_failure_in_all_is_non_fatal(
+        self, fake_db_path: str, mock_conn: MagicMock
+    ) -> None:
+        """If fetch-descriptions raises during --all, prefilter and enrich still run."""
+        enrich_summary = {
+            "companies_processed": 1,
+            "sources_succeeded": {},
+            "sources_failed": {},
+        }
+        pf_summary = {"examined": 3, "filtered": 0, "passed": 3}
+
+        with (
+            patch(_PATCH_INIT_DB),
+            patch(_PATCH_GET_CONNECTION, return_value=mock_conn),
+            patch(_PATCH_GET_DB_PATH, return_value=fake_db_path),
+            patch(_PATCH_ADZUNA) as mock_adzuna_cls,
+            patch(_PATCH_REMOTEOK) as mock_remoteok_cls,
+            patch(_PATCH_LINKEDIN) as mock_linkedin_cls,
+            patch(_PATCH_ATS) as mock_ats_cls,
+            patch(_PATCH_CAREER) as mock_career_cls,
+            patch(_PATCH_DEDUP, return_value=(2, 0)),
+            patch(
+                _PATCH_FETCH_DESCRIPTIONS_RUN,
+                side_effect=RuntimeError("fetch-descriptions crashed"),
+            ),
+            patch(_PATCH_RUN_ENRICHMENT, return_value=enrich_summary) as mock_enrich,
+            patch(_PATCH_RUN_PREFILTER, return_value=pf_summary) as mock_pf,
+        ):
+            _configure_fetcher_mocks(
+                mock_adzuna_cls, mock_remoteok_cls, mock_linkedin_cls,
+                mock_ats_cls, mock_career_cls,
+            )
+            result = main(["--all"])
+
+        # Pipeline continues and exits successfully despite fetch-descriptions failure.
+        mock_pf.assert_called_once()
+        mock_enrich.assert_called_once()
+        assert result == 0
+
+    def test_fetch_descriptions_failure_in_all_does_not_print_fd_summary(
+        self, fake_db_path: str, mock_conn: MagicMock, capsys: pytest.CaptureFixture
+    ) -> None:
+        """When fetch-descriptions fails in --all, its summary is NOT printed."""
+        pf_summary = {"examined": 2, "filtered": 0, "passed": 2}
+        enrich_summary = {
+            "companies_processed": 0,
+            "sources_succeeded": {},
+            "sources_failed": {},
+        }
+
+        with (
+            patch(_PATCH_INIT_DB),
+            patch(_PATCH_GET_CONNECTION, return_value=mock_conn),
+            patch(_PATCH_GET_DB_PATH, return_value=fake_db_path),
+            patch(_PATCH_ADZUNA) as mock_adzuna_cls,
+            patch(_PATCH_REMOTEOK) as mock_remoteok_cls,
+            patch(_PATCH_LINKEDIN) as mock_linkedin_cls,
+            patch(_PATCH_ATS) as mock_ats_cls,
+            patch(_PATCH_CAREER) as mock_career_cls,
+            patch(_PATCH_DEDUP, return_value=(1, 0)),
+            patch(
+                _PATCH_FETCH_DESCRIPTIONS_RUN,
+                side_effect=RuntimeError("network failure"),
+            ),
+            patch(_PATCH_RUN_ENRICHMENT, return_value=enrich_summary),
+            patch(_PATCH_RUN_PREFILTER, return_value=pf_summary),
+        ):
+            _configure_fetcher_mocks(
+                mock_adzuna_cls, mock_remoteok_cls, mock_linkedin_cls,
+                mock_ats_cls, mock_career_cls,
+            )
+            main(["--all"])
+
+        out = capsys.readouterr().out
+        # Fetch-descriptions complete should NOT appear since it threw an exception.
+        assert "Fetch-descriptions complete" not in out
+        # But the other stages' summaries must still appear.
+        assert "Fetch complete" in out
+        assert "Prefilter complete" in out
+        assert "Enrich complete" in out

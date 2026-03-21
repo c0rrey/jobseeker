@@ -1,19 +1,24 @@
 """
 CLI entry point for the jseeker V2 pipeline.
 
-Provides five mutually exclusive stage flags:
+Provides six mutually exclusive stage flags:
 
-  --fetch      Run all API fetchers (Adzuna, RemoteOK, LinkedIn), ATS feed
-               fetcher, and career page crawler, then deduplicate and insert
-               into the database.
-  --enrich     Run the enrichment orchestrator on companies needing enrichment.
-  --prefilter  Run the deterministic pre-filter on unfiltered jobs.
-  --discover   Auto-discover companies from Pass 1 survivors and trigger
-               enrichment for newly discovered companies.  Must be run after
-               Pass 1 scoring (which is handled by Claude Code subagents).
-  --all        Run fetch, prefilter, and enrich in sequence.
-               Note: --discover is NOT included in --all because it requires
-               Pass 1 scoring to have completed first.
+  --fetch               Run all API fetchers (Adzuna, RemoteOK, LinkedIn), ATS
+                        feed fetcher, and career page crawler, then deduplicate
+                        and insert into the database.
+  --fetch-descriptions  Fetch full job descriptions for Pass 1 survivors that
+                        have a NULL full_description.
+  --enrich              Run the enrichment orchestrator on companies needing
+                        enrichment.
+  --prefilter           Run the deterministic pre-filter on unfiltered jobs.
+  --discover            Auto-discover companies from Pass 1 survivors and trigger
+                        enrichment for newly discovered companies.  Must be run
+                        after Pass 1 scoring (which is handled by Claude Code
+                        subagents).
+  --all                 Run fetch, fetch-descriptions, prefilter, and enrich in
+                        sequence.  Note: --discover is NOT included in --all
+                        because it requires Pass 1 scoring to have completed
+                        first.
 
 Note: Scoring and other LLM-based stages are handled by Claude Code subagents
 and are not exposed through this CLI.
@@ -22,6 +27,7 @@ Usage::
 
     python pipeline/cli.py --help
     python pipeline/cli.py --fetch
+    python pipeline/cli.py --fetch-descriptions
     python pipeline/cli.py --enrich
     python pipeline/cli.py --prefilter
     python pipeline/cli.py --discover
@@ -36,6 +42,7 @@ import sys
 from typing import Any
 
 from pipeline.config.settings import get_db_path
+from pipeline.scripts.fetch_descriptions import run as _fetch_descriptions_run
 from pipeline.scripts.discover_companies import (
     _get_existing_survivor_company_count,
     _get_new_survivor_companies,
@@ -225,6 +232,27 @@ def run_prefilter(db_path: str) -> dict[str, int]:
         conn.close()
 
 
+def run_fetch_descriptions(db_path: str) -> dict[str, int]:
+    """Fetch full descriptions for Pass 1 survivors with NULL full_description.
+
+    Delegates to :func:`pipeline.scripts.fetch_descriptions.run`, which
+    queries the database for eligible jobs and fetches their descriptions
+    via :class:`pipeline.scripts.fetch_descriptions.FullDescriptionFetcher`.
+
+    Args:
+        db_path: Filesystem path of the SQLite database.
+
+    Returns:
+        A dict with keys ``"total"``, ``"successful"``, and ``"failed"``
+        (all ``int``).  All three are 0 when no eligible jobs exist.
+
+    Raises:
+        RuntimeError: Propagated from the underlying ``run()`` when the
+            database cannot be opened or the initial query fails.
+    """
+    return _fetch_descriptions_run(db_path)
+
+
 def run_discover(db_path: str) -> dict[str, Any]:
     """Auto-discover companies from Pass 1 survivors and enrich them.
 
@@ -344,6 +372,22 @@ def _print_prefilter_summary(summary: dict[str, int]) -> None:
     )
 
 
+def _print_fetch_descriptions_summary(summary: dict[str, int]) -> None:
+    """Print a human-readable fetch-descriptions stage summary to stdout."""
+    total = summary.get("total", 0)
+    if total == 0:
+        print("Nothing to fetch.")
+        return
+    successful = summary.get("successful", 0)
+    failed = summary.get("failed", 0)
+    print(
+        f"Fetch-descriptions complete. "
+        f"Total: {total}, "
+        f"successful: {successful}, "
+        f"failed: {failed}."
+    )
+
+
 def _print_discover_summary(summary: dict[str, Any]) -> None:
     """Print a human-readable discovery stage summary to stdout."""
     new_discovered = summary.get("new_discovered", 0)
@@ -396,6 +440,7 @@ def _build_parser() -> argparse.ArgumentParser:
         epilog=(
             "Examples:\n"
             "  python pipeline/cli.py --fetch\n"
+            "  python pipeline/cli.py --fetch-descriptions\n"
             "  python pipeline/cli.py --enrich\n"
             "  python pipeline/cli.py --prefilter\n"
             "  python pipeline/cli.py --discover\n"
@@ -410,6 +455,15 @@ def _build_parser() -> argparse.ArgumentParser:
         help=(
             "Run all API fetchers (Adzuna, RemoteOK, LinkedIn), ATS feed "
             "fetcher, and career page crawler, then dedup and insert."
+        ),
+    )
+    group.add_argument(
+        "--fetch-descriptions",
+        action="store_true",
+        dest="fetch_descriptions",
+        help=(
+            "Fetch full job descriptions for Pass 1 survivors with NULL "
+            "full_description. Prints total/successful/failed counts."
         ),
     )
     group.add_argument(
@@ -436,7 +490,7 @@ def _build_parser() -> argparse.ArgumentParser:
         "--all",
         action="store_true",
         help=(
-            "Run fetch, prefilter, and enrich in sequence. "
+            "Run fetch, fetch-descriptions, prefilter, and enrich in sequence. "
             "Does NOT include --discover (requires Pass 1 scoring first)."
         ),
     )
@@ -473,7 +527,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     # No stage selected — print help and exit cleanly.
-    if not any([args.fetch, args.enrich, args.prefilter, args.discover, args.all]):
+    if not any([args.fetch, args.fetch_descriptions, args.enrich, args.prefilter, args.discover, args.all]):
         parser.print_help()
         return 0
 
@@ -488,6 +542,10 @@ def main(argv: list[str] | None = None) -> int:
             summary = run_fetch(db_path)
             _print_fetch_summary(summary)
 
+        elif args.fetch_descriptions:
+            summary = run_fetch_descriptions(db_path)
+            _print_fetch_descriptions_summary(summary)
+
         elif args.enrich:
             summary = run_enrich(db_path)
             _print_enrich_summary(summary)
@@ -501,10 +559,20 @@ def main(argv: list[str] | None = None) -> int:
             _print_discover_summary(summary)
 
         elif args.all:
-            logger.info("Running all stages: fetch -> prefilter -> enrich")
+            logger.info(
+                "Running all stages: fetch -> fetch-descriptions -> prefilter -> enrich"
+            )
 
             fetch_summary = run_fetch(db_path)
             _print_fetch_summary(fetch_summary)
+
+            try:
+                fd_summary = run_fetch_descriptions(db_path)
+                _print_fetch_descriptions_summary(fd_summary)
+            except Exception:
+                logger.exception(
+                    "fetch-descriptions step failed (non-fatal); continuing to prefilter"
+                )
 
             prefilter_summary = run_prefilter(db_path)
             _print_prefilter_summary(prefilter_summary)
