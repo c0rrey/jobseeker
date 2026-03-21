@@ -421,16 +421,17 @@ class TestPersistDiscovery:
 
 
 class TestDiscoverCompany:
-    def test_ats_page_returns_company_record(
+    def test_career_url_returns_company_record(
         self, conn: sqlite3.Connection, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """ATS page discovery returns a CompanyRecord with the resolved career URL."""
+        """Company discovery returns a CompanyRecord with the resolved career URL.
+
+        Phases 3-5 (HTML fetch, LLM analysis, career_page_configs) are
+        currently disabled — only Glassdoor lookup and company row creation
+        run.
+        """
         monkeypatch.setenv("RAPIDAPI_KEY", "fake-rapidapi-key")
         glassdoor_data = {"name": "Acme Corp", "website": "https://acme.com", "rating": 4.5}
-
-        mock_html_response = MagicMock()
-        mock_html_response.text = GREENHOUSE_HTML
-        mock_html_response.raise_for_status = MagicMock()
 
         with patch(
             "pipeline.src.company_discovery._fetch_glassdoor_data",
@@ -438,12 +439,6 @@ class TestDiscoverCompany:
         ), patch(
             "pipeline.src.enrichment.glassdoor_rapidapi._load_cache",
             return_value={},
-        ), patch(
-            "pipeline.src.company_discovery.requests.get",
-            return_value=mock_html_response,
-        ), patch(
-            "pipeline.src.company_discovery._call_llm",
-            return_value=json.dumps(ATS_LLM_RESPONSE),
         ):
             result = discover_company(
                 company_name="Acme Corp",
@@ -454,25 +449,13 @@ class TestDiscoverCompany:
         from pipeline.src.company_discovery import CompanyRecord
         assert isinstance(result, CompanyRecord)
         assert result.career_page_url == "https://acme.com/careers"
-        # Verify the career_page_configs row was written with the ATS feed URL
-        row = conn.execute(
-            "SELECT url, status, discovery_method FROM career_page_configs"
-            " WHERE company_id = ?", (result.company_id,)
-        ).fetchone()
-        assert row is not None
-        assert row["url"] == "https://boards.greenhouse.io/acmecorp"
-        assert row["status"] == "active"
-        assert row["discovery_method"] == "auto"
 
-    def test_non_ats_page_stores_scrape_strategy(
+    def test_no_career_url_with_glassdoor_returns_record(
         self, conn: sqlite3.Connection, monkeypatch: pytest.MonkeyPatch
     ) -> None:
+        """Without a career_url, Glassdoor lookup still creates a company record."""
         monkeypatch.setenv("RAPIDAPI_KEY", "fake-rapidapi-key")
         glassdoor_data = {"name": "Acme Corp", "website": "https://acme.com", "rating": 3.8}
-
-        mock_html_response = MagicMock()
-        mock_html_response.text = CUSTOM_HTML
-        mock_html_response.raise_for_status = MagicMock()
 
         with patch(
             "pipeline.src.company_discovery._fetch_glassdoor_data",
@@ -480,12 +463,6 @@ class TestDiscoverCompany:
         ), patch(
             "pipeline.src.enrichment.glassdoor_rapidapi._load_cache",
             return_value={},
-        ), patch(
-            "pipeline.src.company_discovery.requests.get",
-            return_value=mock_html_response,
-        ), patch(
-            "pipeline.src.company_discovery._call_llm",
-            return_value=json.dumps(CUSTOM_LLM_RESPONSE),
         ):
             result = discover_company(
                 company_name="Acme Corp",
@@ -494,13 +471,6 @@ class TestDiscoverCompany:
             )
 
         assert result is not None
-        row = conn.execute(
-            "SELECT scrape_strategy FROM career_page_configs WHERE company_id = ?",
-            (result.company_id,),
-        ).fetchone()
-        assert row is not None
-        parsed = json.loads(row["scrape_strategy"])
-        assert parsed["job_list_selector"] == "ul.jobs li"
 
     def test_missing_rapidapi_key_returns_none(
         self, conn: sqlite3.Connection, caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
@@ -613,6 +583,7 @@ class TestDiscoverCompany:
         ).fetchone()
         assert row is not None
 
+    @pytest.mark.skip(reason="Phases 3-5 disabled — ats_platform requires LLM analysis")
     def test_ats_platform_set_on_companies_table(
         self, conn: sqlite3.Connection, monkeypatch: pytest.MonkeyPatch
     ) -> None:
