@@ -67,7 +67,7 @@ def _get_pass1_survivors_without_description(
         WHERE j.full_description IS NULL
         ORDER BY sd.overall DESC, j.id
     """
-    if limit is not None:
+    if limit is not None and limit > 0:
         sql += f" LIMIT {int(limit)}"
     cursor = conn.execute(sql, {"pass1": _PASS_1})
     return [dict(row) for row in cursor.fetchall()]
