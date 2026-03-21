@@ -272,11 +272,16 @@ def init_db(db_path: str | Path) -> None:
 def get_connection(db_path: str | Path) -> sqlite3.Connection:
     """Open a SQLite connection with WAL mode and busy_timeout configured.
 
-    Callers are responsible for closing the connection. Prefer using this
-    as a context manager::
+    Callers are responsible for closing the connection.  Note: sqlite3's
+    context manager only commits or rolls back the current transaction on
+    exit — it does **not** close the connection.  Always call
+    ``conn.close()`` explicitly::
 
-        with get_connection("data/jobs.db") as conn:
+        conn = get_connection("data/jobs.db")
+        try:
             rows = conn.execute("SELECT * FROM jobs").fetchall()
+        finally:
+            conn.close()
 
     WAL mode is enforced on every open so that connections created after
     init_db still have WAL active (not just the init connection).
