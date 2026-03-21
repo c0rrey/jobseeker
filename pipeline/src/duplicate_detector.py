@@ -1,16 +1,19 @@
 """
 Content-based duplicate detection engine for job postings.
 
-Groups jobs from the same company whose descriptions are sufficiently similar
-(>= _SIMILARITY_THRESHOLD) using difflib.SequenceMatcher.  Within each group
-the job with the lowest integer ID is marked as the representative.
+Groups jobs from the same company whose titles are sufficiently similar
+(>= _TITLE_SIMILARITY_THRESHOLD) and whose descriptions are sufficiently
+similar (>= _SIMILARITY_THRESHOLD) using difflib.SequenceMatcher.  Within
+each group the job with the lowest integer ID is marked as the representative.
 
 Algorithm
 ---------
 1. Fetch all qualifying jobs (non-NULL description, len >= 20 chars) ordered
    by id ASC so that the representative selection is deterministic.
 2. Partition jobs by normalised company name (case-insensitive strip).
-3. Within each partition run pairwise SequenceMatcher on the description text.
+3. Within each partition check pairwise title similarity first (cheap, short
+   strings); skip pairs below _TITLE_SIMILARITY_THRESHOLD.  For surviving
+   pairs run SequenceMatcher on the description text.
    Union-Find is used to build transitive groups so that A~B, B~C → one group
    rather than two overlapping groups.
 4. Discard singleton non-groups (no detected duplicates).
@@ -136,6 +139,19 @@ class _UnionFind:
 # ---------------------------------------------------------------------------
 
 
+def _title_similarity(a: str, b: str) -> float:
+    """Return SequenceMatcher ratio between two normalised title strings.
+
+    Args:
+        a: First title (already lowercased/stripped by _Job).
+        b: Second title (already lowercased/stripped by _Job).
+
+    Returns:
+        A float in [0.0, 1.0] representing similarity.
+    """
+    return SequenceMatcher(None, a, b).ratio()
+
+
 def _description_similarity(a: str, b: str) -> float:
     """Return SequenceMatcher ratio between two description strings.
 
@@ -214,6 +230,8 @@ def _build_groups(jobs: list[_Job]) -> list[frozenset[int]]:
 
         for i, job_a in enumerate(company_jobs):
             for job_b in company_jobs[i + 1 :]:
+                if _title_similarity(job_a.title, job_b.title) < _TITLE_SIMILARITY_THRESHOLD:
+                    continue
                 similarity = _description_similarity(
                     job_a.description, job_b.description
                 )
@@ -308,10 +326,11 @@ def detect_duplicates(conn: sqlite3.Connection) -> DetectionSummary:
     inside a single transaction; if any step fails the database is rolled back
     to the pre-call state.
 
-    Jobs are grouped when they share the same company (case-insensitive) and
-    their description texts have a SequenceMatcher ratio >= _SIMILARITY_THRESHOLD
-    (0.70).  NULL descriptions and descriptions shorter than 20 characters are
-    excluded.
+    Jobs are grouped when they share the same company (case-insensitive),
+    their titles have a SequenceMatcher ratio >= _TITLE_SIMILARITY_THRESHOLD
+    (0.50), and their description texts have a SequenceMatcher ratio >=
+    _SIMILARITY_THRESHOLD (0.70).  NULL descriptions and descriptions shorter
+    than 20 characters are excluded.
 
     Args:
         conn: An open SQLite connection with foreign_keys = ON.  The caller
