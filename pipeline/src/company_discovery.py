@@ -471,13 +471,11 @@ def _call_llm(prompt: str) -> Optional[str]:
         if not message.content:
             logger.warning("LLM returned empty content list")
             return None
-        block = message.content[0]
-        if not hasattr(block, "text"):
-            logger.warning(
-                "LLM returned non-text content block: %s", type(block).__name__
-            )
-            return None
-        return block.text
+        for block in message.content:
+            if hasattr(block, "text"):
+                return block.text
+        logger.warning("LLM returned no text content blocks")
+        return None
     except Exception as exc:  # noqa: BLE001
         logger.warning("LLM call failed: %s", exc)
         return None
@@ -864,32 +862,11 @@ def discover_company(
     if resolved_url is None:
         return CompanyRecord(company_id=company_id, career_page_url=None)
 
-    result = DiscoveryResult(company_name=company_name, career_url=resolved_url)
-
-    # --- Phase 3: HTML fetch ---
-    html = _fetch_html(result.career_url)  # type: ignore[arg-type]
-    if html is None:
-        logger.warning(
-            "Could not fetch HTML for '%s' at %s; career_page_configs not created.",
-            company_name,
-            result.career_url,
-        )
-        return CompanyRecord(company_id=company_id, career_page_url=resolved_url)
-    result.html = html
-
-    # --- Phase 4: LLM analysis ---
-    llm_response = _analyse_html(html)
-    if llm_response is None:
-        logger.warning(
-            "LLM analysis returned no result for '%s'; career_page_configs not created.",
-            company_name,
-        )
-        return CompanyRecord(company_id=company_id, career_page_url=resolved_url)
-    result.llm_response = llm_response
-
-    # --- Phase 5: DB persistence (career_page_configs) ---
-    _persist_discovery(result, db_connection, company_id)
-
+    # --- Phases 3-5 (ATS detection) skipped ---
+    # HTML fetch + LLM analysis + career_page_configs persistence are
+    # disabled until ATS detection is routed through Claude Code subagents
+    # instead of direct anthropic SDK calls.  The company row and Glassdoor
+    # metadata are already persisted (Phase 2).
     return CompanyRecord(company_id=company_id, career_page_url=resolved_url)
 
 

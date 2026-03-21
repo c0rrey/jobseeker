@@ -24,6 +24,7 @@ import pytest
 from pipeline.src.company_discovery import (
     DiscoveryResult,
     _analyse_html,
+    _call_llm,
     _fetch_html,
     _persist_discovery,
     _resolve_career_url,
@@ -946,3 +947,60 @@ class TestRediscoverBroken:
             """
         ).fetchone()
         assert row["status"] == "active"
+
+
+# ---------------------------------------------------------------------------
+# TestCallLlm
+# ---------------------------------------------------------------------------
+
+
+class TestCallLlm:
+    """Unit tests for _call_llm content-block iteration."""
+
+    def _make_message(self, blocks: list[Any]) -> MagicMock:
+        msg = MagicMock()
+        msg.content = blocks
+        return msg
+
+    def _make_text_block(self, text: str) -> MagicMock:
+        block = MagicMock(spec=["text"])
+        block.text = text
+        return block
+
+    def _make_thinking_block(self) -> MagicMock:
+        # ThinkingBlock has no 'text' attribute
+        block = MagicMock(spec=["thinking"])
+        block.thinking = "some reasoning"
+        return block
+
+    def test_thinking_then_text_returns_text(self) -> None:
+        """ThinkingBlock at [0] followed by TextBlock at [1] → returns text."""
+        message = self._make_message(
+            [self._make_thinking_block(), self._make_text_block("result")]
+        )
+        with patch("anthropic.Anthropic") as mock_client_cls:
+            mock_client_cls.return_value.messages.create.return_value = message
+            assert _call_llm("prompt") == "result"
+
+    def test_empty_content_returns_none(self) -> None:
+        """Empty content list → returns None with warning."""
+        message = self._make_message([])
+        with patch("anthropic.Anthropic") as mock_client_cls:
+            mock_client_cls.return_value.messages.create.return_value = message
+            assert _call_llm("prompt") is None
+
+    def test_no_text_blocks_returns_none(self) -> None:
+        """Content list with only non-text blocks → returns None with warning."""
+        message = self._make_message(
+            [self._make_thinking_block(), self._make_thinking_block()]
+        )
+        with patch("anthropic.Anthropic") as mock_client_cls:
+            mock_client_cls.return_value.messages.create.return_value = message
+            assert _call_llm("prompt") is None
+
+    def test_text_block_at_index_zero_returns_text(self) -> None:
+        """TextBlock at [0] (no thinking prefix) → still returns text."""
+        message = self._make_message([self._make_text_block("direct")])
+        with patch("anthropic.Anthropic") as mock_client_cls:
+            mock_client_cls.return_value.messages.create.return_value = message
+            assert _call_llm("prompt") == "direct"
