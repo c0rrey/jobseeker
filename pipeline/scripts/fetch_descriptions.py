@@ -106,58 +106,58 @@ def run(db_path: str, rate_limit: float = 1.0, limit: int | None = None) -> int:
         return 1
 
     try:
-        jobs = _get_pass1_survivors_without_description(conn, limit=limit)
-    except Exception as exc:
-        logger.error("Failed to query Pass 1 survivors: %s", exc)
-        conn.close()
-        return 1
+        try:
+            jobs = _get_pass1_survivors_without_description(conn, limit=limit)
+        except Exception as exc:
+            logger.error("Failed to query Pass 1 survivors: %s", exc)
+            return 1
 
-    total = len(jobs)
-    successful = 0
-    failed = 0
+        total = len(jobs)
+        successful = 0
+        failed = 0
 
-    logger.info(
-        "fetch_descriptions: total=%d to fetch, rate_limit=%.1fs",
-        total,
-        rate_limit,
-    )
+        logger.info(
+            "fetch_descriptions: total=%d to fetch, rate_limit=%.1fs",
+            total,
+            rate_limit,
+        )
 
-    if total == 0:
-        logger.info("Nothing to fetch — all Pass 1 survivors already have descriptions.")
-        conn.close()
-        return 0
+        if total == 0:
+            logger.info("Nothing to fetch — all Pass 1 survivors already have descriptions.")
+            return 0
 
-    fetcher = FullDescriptionFetcher(rate_limit_seconds=rate_limit)
+        fetcher = FullDescriptionFetcher(rate_limit_seconds=rate_limit)
 
-    for job in jobs:
-        db_id: int = job["id"]
-        url: str = job["url"]
-        source: str = job["source"]
+        for job in jobs:
+            db_id: int = job["id"]
+            url: str = job["url"]
+            source: str = job["source"]
 
-        logger.info("Fetching job id=%d url=%s", db_id, url)
-        text = fetcher.fetch_full_description(url=url, source=source)
+            logger.info("Fetching job id=%d url=%s", db_id, url)
+            text = fetcher.fetch_full_description(url=url, source=source)
 
-        if text:
-            try:
-                _save_description(conn, db_id, text)
-                successful += 1
-                logger.info("  Saved %d chars for job id=%d", len(text), db_id)
-            except Exception as exc:
-                logger.warning("  DB write failed for job id=%d: %s", db_id, exc)
+            if text:
+                try:
+                    _save_description(conn, db_id, text)
+                    successful += 1
+                    logger.info("  Saved %d chars for job id=%d", len(text), db_id)
+                except Exception as exc:
+                    logger.warning("  DB write failed for job id=%d: %s", db_id, exc)
+                    failed += 1
+            else:
                 failed += 1
-        else:
-            failed += 1
-            logger.warning("  No description retrieved for job id=%d", db_id)
+                logger.warning("  No description retrieved for job id=%d", db_id)
 
-    logger.info(
-        "fetch_descriptions complete: total=%d successful=%d failed=%d",
-        total,
-        successful,
-        failed,
-    )
+        logger.info(
+            "fetch_descriptions complete: total=%d successful=%d failed=%d",
+            total,
+            successful,
+            failed,
+        )
 
-    conn.close()
-    return 0
+        return 0
+    finally:
+        conn.close()
 
 
 def _build_parser() -> argparse.ArgumentParser:
