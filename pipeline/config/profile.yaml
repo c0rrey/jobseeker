@@ -5,6 +5,7 @@
 title_keywords:
   - data engineer
   - analytics engineer
+  - analytics
   - applied ai
   - agentic
 
@@ -42,10 +43,12 @@ preferred_locations:
   - Orlando, FL
   - Remote
 
-# Minimum salary (annual, USD)
+# Soft-YES salary threshold (annual, USD) — roles that signal compensation below this
+# are a soft negative in the LLM fast-filter vote (may still pass on other merits)
 salary_min: 150000
 
-# Hard-NO salary floor (annual, USD) — roles explicitly below this are rejected outright
+# Hard-NO salary floor (annual, USD) — roles that explicitly list compensation below
+# this are rejected outright regardless of other factors
 salary_floor: 140000
 
 # Maximum job age (days) - filter out postings older than this
