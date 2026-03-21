@@ -115,6 +115,9 @@ class TestLevelsfyEnrich:
         assert levelsfy_data["median_total_comp"] == 250000
         assert levelsfy_data["sample_size"] == 42
         assert len(levelsfy_data["levels"]) == 2
+        # enriched_at must NOT be written by the source module — only the
+        # orchestrator's _update_enriched_at should set this field (seek-139).
+        assert row["enriched_at"] is None
 
     def test_http_error_returns_false(self, db_conn: sqlite3.Connection) -> None:
         """enrich() returns False on HTTP error."""

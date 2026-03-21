@@ -18,7 +18,6 @@ from __future__ import annotations
 import json
 import logging
 import sqlite3
-from datetime import datetime, timezone
 from typing import Any
 
 import requests
@@ -98,7 +97,6 @@ def _update_company(
         company_id: Primary key used to locate the row via the ``id`` column.
         fields: Column-value pairs to update.
     """
-    fields["enriched_at"] = datetime.now(timezone.utc).isoformat()
     set_clause = ", ".join(f"{col} = ?" for col in fields)
     values = list(fields.values()) + [company_id]
     conn.execute(
