@@ -71,7 +71,8 @@ CREATE TABLE IF NOT EXISTS jobs (
     last_seen_at TEXT NOT NULL DEFAULT (datetime('now')),
     ats_platform TEXT,
     raw_json TEXT,
-    dedup_hash TEXT
+    dedup_hash TEXT,
+    full_description TEXT
 );
 """
 
@@ -254,6 +255,10 @@ def init_db(db_path: str | Path) -> None:
             conn.execute(
                 "ALTER TABLE score_dimensions RENAME COLUMN skills_gap TO skills_match"
             )
+        # Migration: add full_description column to jobs for existing databases.
+        jobs_cols = {row[1] for row in conn.execute("PRAGMA table_info(jobs)")}
+        if "full_description" not in jobs_cols:
+            conn.execute("ALTER TABLE jobs ADD COLUMN full_description TEXT")
         conn.commit()
     finally:
         conn.close()
