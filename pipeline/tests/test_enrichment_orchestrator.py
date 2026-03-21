@@ -2,9 +2,8 @@
 Tests for pipeline/src/enrichment/orchestrator.py.
 
 Enrichment sources are mocked so no real network calls are made.
-By default CRUNCHBASE_ENABLED is not set, so the orchestrator runs three
-sources (glassdoor, levelsfy, stackshare).  A dedicated test class verifies
-that setting CRUNCHBASE_ENABLED=true adds crunchbase back to the source list.
+The orchestrator runs two sources: glassdoor (via glassdoor_rapidapi) and
+levelsfy.
 
 Tests verify:
 - companies_needing_enrichment query (NULL and stale enriched_at)
@@ -14,12 +13,10 @@ Tests verify:
 - summary dict keys and counts
 - empty database: no companies processed
 - exception inside enrich function treated as failure (logged, not raised)
-- CRUNCHBASE_ENABLED toggle includes/excludes crunchbase
 """
 
 from __future__ import annotations
 
-import importlib
 import sqlite3
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -28,9 +25,7 @@ import pytest
 
 from pipeline.src.database import init_db
 from pipeline.src.enrichment.orchestrator import (
-    EnrichmentSummary,
     _SOURCES,
-    _STALE_DAYS,
     _query_companies_needing_enrichment,
     run_enrichment,
 )
@@ -41,19 +36,16 @@ from pipeline.src.enrichment.orchestrator import (
 # module.enrich at call time.
 # ---------------------------------------------------------------------------
 
-_PATCH_CRUNCHBASE = "pipeline.src.enrichment.crunchbase.enrich"
-_PATCH_GLASSDOOR = "pipeline.src.enrichment.glassdoor.enrich"
+_PATCH_GLASSDOOR = "pipeline.src.enrichment.glassdoor_rapidapi.enrich"
 _PATCH_LEVELSFY = "pipeline.src.enrichment.levelsfy.enrich"
-_PATCH_STACKSHARE = "pipeline.src.enrichment.stackshare.enrich"
 
-# Active sources/targets reflect the default (crunchbase disabled).
+# Active sources/targets: glassdoor (via glassdoor_rapidapi) and levelsfy.
 _ACTIVE_PATCH_TARGETS = [
     _PATCH_GLASSDOOR,
     _PATCH_LEVELSFY,
-    _PATCH_STACKSHARE,
 ]
 
-_ACTIVE_SOURCE_NAMES = ["glassdoor", "levelsfy", "stackshare"]
+_ACTIVE_SOURCE_NAMES = ["glassdoor", "levelsfy"]
 
 
 # ---------------------------------------------------------------------------
@@ -289,12 +281,11 @@ class TestRunEnrichmentAllSucceed:
         _insert_company(db_conn, "Alpha Corp")
 
         with patch(_PATCH_GLASSDOOR, return_value=True) as gd, \
-             patch(_PATCH_LEVELSFY, return_value=True) as lf, \
-             patch(_PATCH_STACKSHARE, return_value=True) as ss:
+             patch(_PATCH_LEVELSFY, return_value=True) as lf:
             run_enrichment(db_conn)
 
         for mock_fn, source in zip(
-            [gd, lf, ss], _ACTIVE_SOURCE_NAMES
+            [gd, lf], _ACTIVE_SOURCE_NAMES
         ):
             assert mock_fn.call_count == 1, f"{source} not called once"
             args, _ = mock_fn.call_args
@@ -314,16 +305,14 @@ class TestRunEnrichmentPartialFailure:
         """The failing source appears in sources_failed with count >= 1."""
         _insert_company(db_conn, "Alpha Corp")
 
-        # Glassdoor fails, the rest succeed.
+        # Glassdoor fails, levelsfy succeeds.
         with patch(_PATCH_GLASSDOOR, return_value=False), \
              patch(_PATCH_LEVELSFY, return_value=True), \
-             patch(_PATCH_STACKSHARE, return_value=True), \
              patch("pipeline.src.enrichment.orchestrator.time.sleep"):
             summary = run_enrichment(db_conn)
 
         assert summary["sources_failed"]["glassdoor"] >= 1
         assert summary["sources_succeeded"]["levelsfy"] == 1
-        assert summary["sources_succeeded"]["stackshare"] == 1
 
     def test_enriched_at_still_set_on_partial_failure(
         self, db_conn: sqlite3.Connection
@@ -333,7 +322,6 @@ class TestRunEnrichmentPartialFailure:
 
         with patch(_PATCH_GLASSDOOR, return_value=False), \
              patch(_PATCH_LEVELSFY, return_value=True), \
-             patch(_PATCH_STACKSHARE, return_value=True), \
              patch("pipeline.src.enrichment.orchestrator.time.sleep"):
             run_enrichment(db_conn)
 
@@ -348,14 +336,12 @@ class TestRunEnrichmentPartialFailure:
 
         with patch(_PATCH_GLASSDOOR, return_value=False) as gd, \
              patch(_PATCH_LEVELSFY, return_value=True) as lf, \
-             patch(_PATCH_STACKSHARE, return_value=True) as ss, \
              patch("pipeline.src.enrichment.orchestrator.time.sleep"):
             run_enrichment(db_conn)
 
         # Each mock is called at least once (backoff may trigger retries for gd).
         assert gd.call_count >= 1
         assert lf.call_count >= 1
-        assert ss.call_count >= 1
 
 
 # ---------------------------------------------------------------------------
@@ -418,7 +404,6 @@ class TestRunEnrichmentExceptionHandling:
 
         with patch(_PATCH_GLASSDOOR, side_effect=RuntimeError("boom")), \
              patch(_PATCH_LEVELSFY, return_value=True), \
-             patch(_PATCH_STACKSHARE, return_value=True), \
              patch("pipeline.src.enrichment.orchestrator.time.sleep"):
             # Should not raise.
             summary = run_enrichment(db_conn)
@@ -431,13 +416,11 @@ class TestRunEnrichmentExceptionHandling:
 
         with patch(_PATCH_GLASSDOOR, return_value=True), \
              patch(_PATCH_LEVELSFY, side_effect=ValueError("bad data")), \
-             patch(_PATCH_STACKSHARE, return_value=True), \
              patch("pipeline.src.enrichment.orchestrator.time.sleep"):
             summary = run_enrichment(db_conn)
 
         assert summary["sources_failed"]["levelsfy"] >= 1
         assert summary["sources_succeeded"]["glassdoor"] == 1
-        assert summary["sources_succeeded"]["stackshare"] == 1
 
     def test_enriched_at_set_despite_exception(
         self, db_conn: sqlite3.Connection
@@ -447,7 +430,6 @@ class TestRunEnrichmentExceptionHandling:
 
         with patch(_PATCH_GLASSDOOR, side_effect=RuntimeError("crash")), \
              patch(_PATCH_LEVELSFY, return_value=True), \
-             patch(_PATCH_STACKSHARE, return_value=True), \
              patch("pipeline.src.enrichment.orchestrator.time.sleep"):
             run_enrichment(db_conn)
 
@@ -514,7 +496,6 @@ class TestRunEnrichmentMultipleCompanies:
 
         with patch(_PATCH_GLASSDOOR, side_effect=glassdoor_alternating), \
              patch(_PATCH_LEVELSFY, return_value=True), \
-             patch(_PATCH_STACKSHARE, return_value=True), \
              patch("pipeline.src.enrichment.orchestrator.time.sleep"):
             summary = run_enrichment(db_conn)
 
@@ -522,43 +503,28 @@ class TestRunEnrichmentMultipleCompanies:
         assert summary["sources_succeeded"]["glassdoor"] == 2
         assert summary["sources_failed"]["glassdoor"] >= 1
         assert summary["sources_succeeded"]["levelsfy"] == 3
-        assert summary["sources_succeeded"]["stackshare"] == 3
 
 
 # ---------------------------------------------------------------------------
-# CRUNCHBASE_ENABLED toggle
+# _SOURCES structure
 # ---------------------------------------------------------------------------
 
 
-class TestCrunchbaseEnabledToggle:
-    """Verify CRUNCHBASE_ENABLED env var controls source inclusion."""
+class TestSourcesStructure:
+    """Verify the _SOURCES dispatch table reflects the two-source architecture."""
 
-    def test_crunchbase_excluded_by_default(self) -> None:
-        """Without CRUNCHBASE_ENABLED, crunchbase is not in _SOURCES."""
-        source_names = [name for name, _, _ in _SOURCES]
-        assert "crunchbase" not in source_names
+    def test_exactly_two_sources(self) -> None:
+        """The orchestrator dispatch table contains exactly two sources."""
+        assert len(_SOURCES) == 2
 
-    def test_crunchbase_included_when_enabled(self) -> None:
-        """Setting CRUNCHBASE_ENABLED=true adds crunchbase to _SOURCES."""
-        import pipeline.src.enrichment.orchestrator as orch_mod
+    def test_source_names(self) -> None:
+        """The two source names are glassdoor and levelsfy."""
+        names = [name for name, _, _ in _SOURCES]
+        assert names == ["glassdoor", "levelsfy"]
 
-        with patch.dict("os.environ", {"CRUNCHBASE_ENABLED": "true"}):
-            importlib.reload(orch_mod)
-            source_names = [name for name, _, _ in orch_mod._SOURCES]
-
-        # Reload again without the env var to restore default state.
-        importlib.reload(orch_mod)
-
-        assert "crunchbase" in source_names
-
-    def test_crunchbase_excluded_when_disabled(self) -> None:
-        """Setting CRUNCHBASE_ENABLED=false excludes crunchbase from _SOURCES."""
-        import pipeline.src.enrichment.orchestrator as orch_mod
-
-        with patch.dict("os.environ", {"CRUNCHBASE_ENABLED": "false"}):
-            importlib.reload(orch_mod)
-            source_names = [name for name, _, _ in orch_mod._SOURCES]
-
-        importlib.reload(orch_mod)
-
-        assert "crunchbase" not in source_names
+    def test_sources_have_module_and_rate_limit(self) -> None:
+        """Each entry in _SOURCES is a (str, module, float) triple."""
+        for name, module, rate_limit in _SOURCES:
+            assert isinstance(name, str)
+            assert hasattr(module, "enrich"), f"{name} module missing .enrich"
+            assert isinstance(rate_limit, float)
