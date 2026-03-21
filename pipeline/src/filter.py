@@ -98,6 +98,20 @@ def is_intern_role(job: Job) -> bool:
     return any(keyword in title_lower for keyword in intern_keywords)
 
 
+def is_non_ic_role(job: Job) -> bool:
+    """Return True if the job is a management/leadership role, not IC."""
+    if not job.title:
+        return False
+
+    title_lower = job.title.lower()
+    non_ic_keywords = [
+        "manager", "director", "vice president", "vp ", "vp,",
+        "head of", "chief", "svp", "evp",
+    ]
+
+    return any(keyword in title_lower for keyword in non_ic_keywords)
+
+
 def is_too_old(job: Job, max_age_days: int = 90) -> bool:
     """
     Return True if the job posting is older than max_age_days.
@@ -339,8 +353,12 @@ def run_prefilter(db_connection: sqlite3.Connection) -> dict[str, int]:
             reason = "salary"
         elif is_intern_role(job):
             reason = "intern"
+        elif is_non_ic_role(job):
+            reason = "non_ic"
         elif is_too_old(job, max_age_days):
             reason = "too_old"
+        elif not is_allowed_location(job):
+            reason = "location"
 
         if reason is not None:
             db_connection.execute(

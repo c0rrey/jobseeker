@@ -348,16 +348,16 @@ def main(argv: list[str] | None = None) -> int:
             _print_prefilter_summary(summary)
 
         elif args.all:
-            logger.info("Running all stages: fetch -> enrich -> prefilter")
+            logger.info("Running all stages: fetch -> prefilter -> enrich")
 
             fetch_summary = run_fetch(db_path)
             _print_fetch_summary(fetch_summary)
 
-            enrich_summary = run_enrich(db_path)
-            _print_enrich_summary(enrich_summary)
-
             prefilter_summary = run_prefilter(db_path)
             _print_prefilter_summary(prefilter_summary)
+
+            enrich_summary = run_enrich(db_path)
+            _print_enrich_summary(enrich_summary)
 
     except Exception:
         logger.exception("Pipeline stage failed")

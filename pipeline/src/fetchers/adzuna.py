@@ -35,7 +35,7 @@ class AdzunaFetcher(BaseFetcher):
         app_key: Optional[str] = None,
         country: str = "us",
         results_per_page: int = 50,
-        max_pages: int = 3,
+        max_pages: int = 6,
         auto_increase_pages: bool = True,
     ):
         """

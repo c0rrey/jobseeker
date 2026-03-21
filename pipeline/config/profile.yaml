@@ -7,7 +7,6 @@ title_keywords:
   - analytics engineer
   - product analytics
   - data analyst
-  - product analyst
   - decision systems
   - product data
 
@@ -43,7 +42,7 @@ preferred_locations:
   - Remote
 
 # Minimum salary (annual, USD)
-salary_min: 130000
+salary_min: 150000
 
 # Maximum job age (days) - filter out postings older than this
 max_job_age_days: 90
