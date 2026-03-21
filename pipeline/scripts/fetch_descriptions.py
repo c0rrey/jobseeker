@@ -7,7 +7,7 @@ the full HTML description from each job's URL and writes it back.
 
 Usage::
 
-    python -m pipeline.scripts.fetch_descriptions [--db-path PATH] [--rate-limit SECS]
+    python -m pipeline.scripts.fetch_descriptions [--db PATH] [--rate-limit SECS]
 
 Environment variables:
     DB_PATH: Override the default database path (same as pipeline CLI).
@@ -165,7 +165,7 @@ def _build_parser() -> argparse.ArgumentParser:
         description="Fetch full job descriptions for Pass 1 survivors."
     )
     parser.add_argument(
-        "--db-path",
+        "--db",
         default=None,
         metavar="PATH",
         help="Path to SQLite database. Defaults to DB_PATH env var or data/jobs.db.",
@@ -192,7 +192,7 @@ def main() -> None:
     parser = _build_parser()
     args = parser.parse_args()
 
-    db_path = args.db_path or get_db_path()
+    db_path = args.db or get_db_path()
     sys.exit(run(db_path=db_path, rate_limit=args.rate_limit, limit=args.limit))
 
 
