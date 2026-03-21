@@ -149,7 +149,12 @@ def run(
             source: str = job["source"]
 
             logger.info("Fetching job id=%d url=%s", db_id, url)
-            text = fetcher.fetch_full_description(url=url, source=source)
+            try:
+                text = fetcher.fetch_full_description(url=url, source=source)
+            except Exception as exc:
+                logger.warning("  HTTP fetch failed for job id=%d: %s", db_id, exc)
+                failed += 1
+                continue
 
             if text:
                 try:

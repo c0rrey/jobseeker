@@ -194,6 +194,37 @@ class TestRunTally:
 
         assert result == {"total": 3, "successful": 2, "failed": 1}
 
+    def test_fetch_exception_increments_failed_and_continues(self, tmp_path: Path) -> None:
+        """AC: network exception from fetch_full_description increments failed, doesn't abort."""
+        mock_conn = MagicMock()
+        jobs = [_make_job(1), _make_job(2), _make_job(3)]
+
+        def fake_fetch(url: str, source: str) -> str:
+            if "job/2" in url:
+                raise OSError("connection reset")
+            return "x" * 200
+
+        with (
+            patch(
+                "pipeline.scripts.fetch_descriptions.get_connection",
+                return_value=mock_conn,
+            ),
+            patch(
+                "pipeline.scripts.fetch_descriptions._get_pass1_survivors_without_description",
+                return_value=jobs,
+            ),
+            patch(
+                "pipeline.scripts.fetch_descriptions.FullDescriptionFetcher"
+            ) as mock_fetcher_cls,
+            patch(
+                "pipeline.scripts.fetch_descriptions._save_description"
+            ),
+        ):
+            mock_fetcher_cls.return_value.fetch_full_description.side_effect = fake_fetch
+            result = run(db_path=str(tmp_path / "jobs.db"), rate_limit=0.0)
+
+        assert result == {"total": 3, "successful": 2, "failed": 1}
+
     def test_db_write_failure_counts_as_failed(self, tmp_path: Path) -> None:
         mock_conn = MagicMock()
         job = _make_job(1)
