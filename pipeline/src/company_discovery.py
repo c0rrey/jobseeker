@@ -201,10 +201,10 @@ def _fetch_glassdoor_data(
         "x-rapidapi-host": "real-time-glassdoor-data.p.rapidapi.com",
         "x-rapidapi-key": api_key,
     }
-    # Normalise the company name: strip characters that confuse the API.
-    safe_name = company_name.strip()
+    # Strip leading/trailing whitespace before passing to the API.
+    stripped_name = company_name.strip()
     params: dict[str, str] = {
-        "company_id": safe_name,
+        "company_id": stripped_name,
         "domain": "www.glassdoor.com",
     }
 
