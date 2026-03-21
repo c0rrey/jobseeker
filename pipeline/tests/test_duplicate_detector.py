@@ -16,6 +16,7 @@ No LLM calls and no network calls are made.
 
 from __future__ import annotations
 
+import itertools
 import sqlite3
 from pathlib import Path
 
@@ -65,7 +66,7 @@ def db_conn(tmp_path: Path) -> sqlite3.Connection:
 # ---------------------------------------------------------------------------
 
 
-_url_counter: list[int] = [0]
+_url_counter = itertools.count(start=1)
 
 
 def _insert_job(
@@ -80,8 +81,7 @@ def _insert_job(
 
     Uses a module-level counter to guarantee unique URLs across calls.
     """
-    _url_counter[0] += 1
-    unique_url = url or f"https://example.com/job/{_url_counter[0]}"
+    unique_url = url or f"https://example.com/job/{next(_url_counter)}"
     conn.execute(
         """
         INSERT INTO jobs (source, source_type, url, title, company, description)

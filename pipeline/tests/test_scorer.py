@@ -20,6 +20,7 @@ pipeline.src.database.  No LLM calls are made.
 
 from __future__ import annotations
 
+import itertools
 import json
 import sqlite3
 from pathlib import Path
@@ -58,6 +59,9 @@ def db_conn(tmp_path: Path) -> sqlite3.Connection:
     conn.close()
 
 
+_insert_job_counter = itertools.count(start=1)
+
+
 def _insert_job(
     conn: sqlite3.Connection,
     *,
@@ -68,9 +72,7 @@ def _insert_job(
     location: str | None = "Remote",
 ) -> int:
     """Insert a minimal job row and return its id."""
-    static_counter = getattr(_insert_job, "_counter", 0) + 1
-    _insert_job._counter = static_counter  # type: ignore[attr-defined]
-    unique_url = url or f"https://example.com/job/{static_counter}"
+    unique_url = url or f"https://example.com/job/{next(_insert_job_counter)}"
     conn.execute(
         """
         INSERT INTO jobs (source, source_type, url, title, company, description, location)
