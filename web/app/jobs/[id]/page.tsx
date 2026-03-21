@@ -260,14 +260,14 @@ export default async function JobDetailPage({
           )}
 
           {/* Job description */}
-          {job.description && (
+          {(job.full_description || job.description) && (
             <Card>
               <CardHeader>
                 <CardTitle>Job Description</CardTitle>
               </CardHeader>
               <CardContent>
                 <div className="prose prose-sm max-w-none text-sm leading-relaxed whitespace-pre-wrap text-muted-foreground">
-                  {job.description}
+                  {job.full_description || job.description}
                 </div>
               </CardContent>
             </Card>
