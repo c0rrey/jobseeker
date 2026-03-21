@@ -249,6 +249,7 @@ def write_pass1_results(
         - ``job_id`` (int): database primary key of the job
         - ``verdict`` (str): ``"yes"`` or ``"no"``
         - ``confidence`` (int): 0–100
+        - ``reasoning`` (str | None): LLM explanation text; ``None`` when absent
 
     Mapping rules:
         - ``verdict == "no"``  → ``overall = 0``
