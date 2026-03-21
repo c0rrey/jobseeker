@@ -37,6 +37,8 @@ import math
 import sqlite3
 from typing import Any
 
+from pipeline.src.duplicate_detector import propagate_scores
+
 logger = logging.getLogger(__name__)
 
 
@@ -333,6 +335,9 @@ def write_pass1_results(
                 exc,
             )
 
+    propagated = propagate_scores(db_connection, PASS_1)
+    logger.debug("write_pass1_results: propagated %d Pass 1 scores to group members", propagated)
+
     return rows_written
 
 
@@ -513,5 +518,8 @@ def write_pass2_results(
                 result.get("job_id"),
                 exc,
             )
+
+    propagated = propagate_scores(db_connection, PASS_2)
+    logger.debug("write_pass2_results: propagated %d Pass 2 scores to group members", propagated)
 
     return rows_written

@@ -28,6 +28,7 @@ is a future optimisation, not in scope here.
 Public API
 ----------
     detect_duplicates(conn) -> DetectionSummary
+    propagate_scores(conn, pass_number) -> int
 """
 
 from __future__ import annotations
@@ -347,3 +348,138 @@ def detect_duplicates(conn: sqlite3.Connection) -> DetectionSummary:
         summary.representatives_set,
     )
     return summary
+
+
+def propagate_scores(conn: sqlite3.Connection, pass_number: int) -> int:
+    """Copy scores from each duplicate group's representative to all non-representative members.
+
+    For every duplicate group that has a scored representative (i.e. a
+    ``score_dimensions`` row with the given ``pass_number``), this function
+    writes an equivalent row for every non-representative member of the same
+    group.  Rows are written with ``INSERT OR REPLACE`` so the operation is
+    fully idempotent — reruns overwrite previously propagated rows without
+    raising a ``UNIQUE`` constraint error.
+
+    The ``reasoning`` column for propagated rows is set to:
+    ``"Score propagated from representative job_id=<rep_id>"``
+    so that downstream consumers can distinguish propagated scores from
+    independently scored ones.
+
+    The ``scored_at`` timestamp is set to ``datetime('now')`` at write time.
+    The ``profile_hash`` from the representative row is preserved so that
+    staleness detection in ``scorer.get_stale_scored_jobs`` and
+    ``scorer.get_pass1_survivors`` treats propagated rows consistently.
+
+    Known limitation: if a representative job is later deleted, the reasoning
+    field of already-propagated rows will contain a dangling reference.  No FK
+    constraint enforces this — it is an observable but harmless inconsistency.
+
+    Args:
+        conn: An open SQLite connection.  The caller is responsible for
+            opening and closing the connection.  This function commits its
+            own transaction internally.
+        pass_number: The scoring pass to propagate (1 or 2).  Must match a
+            value stored in the ``pass`` column of ``score_dimensions``.
+
+    Returns:
+        The number of ``score_dimensions`` rows written (inserted or replaced)
+        for non-representative group members.  Returns 0 when no duplicate
+        groups exist or no representatives have been scored for this pass.
+
+    Raises:
+        sqlite3.Error: If any database operation fails.  The transaction is
+            rolled back automatically.
+    """
+    # Fetch all representative scores for this pass together with the full
+    # list of non-representative members in the same group.
+    #
+    # The query joins:
+    #   score_dimensions (rep's row)  →  jobs (rep)  →  jobs (non-reps in group)
+    #
+    # Only groups where the representative already has a score_dimensions row
+    # for `pass_number` are included.  Non-representatives that already have a
+    # row will be overwritten (INSERT OR REPLACE handles this).
+    # Column positions (0-based) in the SELECT below — documented here so the
+    # index-based access further down is auditable without re-reading the SQL.
+    # 0: member_job_id   1: pass   2: role_fit   3: skills_match
+    # 4: culture_signals  5: growth_potential  6: comp_alignment
+    # 7: overall  8: profile_hash  9: representative_id
+    query = """
+        SELECT
+            non_rep.id          AS member_job_id,
+            rep_sd.pass         AS pass,
+            rep_sd.role_fit     AS role_fit,
+            rep_sd.skills_match AS skills_match,
+            rep_sd.culture_signals   AS culture_signals,
+            rep_sd.growth_potential  AS growth_potential,
+            rep_sd.comp_alignment    AS comp_alignment,
+            rep_sd.overall      AS overall,
+            rep_sd.profile_hash AS profile_hash,
+            rep_job.id          AS representative_id
+        FROM jobs AS rep_job
+        INNER JOIN score_dimensions AS rep_sd
+            ON rep_sd.job_id = rep_job.id
+           AND rep_sd.pass = :pass_number
+        INNER JOIN jobs AS non_rep
+            ON non_rep.dup_group_id = rep_job.dup_group_id
+           AND non_rep.is_representative = 0
+        WHERE rep_job.is_representative = 1
+          AND rep_job.dup_group_id IS NOT NULL
+        ORDER BY rep_job.id, non_rep.id
+    """
+    rows = conn.execute(query, {"pass_number": pass_number}).fetchall()
+
+    if not rows:
+        logger.debug(
+            "propagate_scores: pass=%d — no representative scores found, nothing to propagate",
+            pass_number,
+        )
+        return 0
+
+    # Build parameter dicts for executemany.  Column access uses both index
+    # and key syntax so the function works regardless of whether the caller
+    # has set conn.row_factory = sqlite3.Row or left it as the default tuple.
+    params: list[dict[str, object]] = []
+    for row in rows:
+        # row[9] = representative_id (works for tuple rows and sqlite3.Row)
+        representative_id = row[9]
+        reasoning = (
+            f"Score propagated from representative job_id={representative_id}"
+        )
+        params.append(
+            {
+                "job_id": row[0],    # member_job_id
+                "pass": row[1],      # pass
+                "role_fit": row[2],  # role_fit
+                "skills_match": row[3],       # skills_match
+                "culture_signals": row[4],    # culture_signals
+                "growth_potential": row[5],   # growth_potential
+                "comp_alignment": row[6],     # comp_alignment
+                "overall": row[7],            # overall
+                "reasoning": reasoning,
+                "profile_hash": row[8],       # profile_hash
+            }
+        )
+
+    with conn:
+        conn.executemany(
+            """
+            INSERT OR REPLACE INTO score_dimensions
+                (job_id, pass, role_fit, skills_match, culture_signals,
+                 growth_potential, comp_alignment, overall, reasoning,
+                 profile_hash, scored_at)
+            VALUES
+                (:job_id, :pass, :role_fit, :skills_match, :culture_signals,
+                 :growth_potential, :comp_alignment, :overall, :reasoning,
+                 :profile_hash, datetime('now'))
+            """,
+            params,
+        )
+
+    count = len(params)
+    logger.info(
+        "propagate_scores: pass=%d — propagated %d score rows to non-representative group members",
+        pass_number,
+        count,
+    )
+    return count
