@@ -43,8 +43,8 @@ preferred_locations:
   - Orlando, FL
   - Remote
 
-salary_min: 150000    # [SOFT] preference threshold — compensation signals below this are a soft negative; role may still pass on other merits
-salary_floor: 140000  # [HARD] floor — roles that explicitly list compensation below this are rejected outright regardless of other factors
+salary_target: 150000  # soft preference threshold — compensation signals below this are a soft negative; role may still pass on other merits
+salary_min: 140000     # hard floor — roles that explicitly list compensation below this are rejected outright regardless of other factors
 
 # Maximum job age (days) - filter out postings older than this
 max_job_age_days: 90

@@ -103,7 +103,7 @@ def db() -> Generator[sqlite3.Connection, None, None]:
 def _patch_profile(monkeypatch: pytest.MonkeyPatch) -> None:
     """Patch load_profile() to return deterministic settings for all tests."""
     profile = {
-        "salary_min": 100_000,
+        "salary_target": 100_000,
         "max_job_age_days": 30,
         "title_keywords": ["data engineer"],
     }
@@ -241,7 +241,7 @@ class TestSalaryFilter:
         assert sentinel["reasoning"] == "salary"
 
     def test_salary_below_min_is_filtered(self, db: sqlite3.Connection) -> None:
-        # profile salary_min is 100_000; 50k max should fail
+        # profile salary_target is 100_000; 50k max should fail
         job_id = insert_job(db, salary_min=40_000, salary_max=50_000)
         run_prefilter(db)
         sentinel = get_sentinel(db, job_id)

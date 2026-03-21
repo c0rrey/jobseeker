@@ -35,7 +35,7 @@ class AdzunaFetcher(BaseFetcher):
         app_key: Optional[str] = None,
         country: str = "us",
         results_per_page: int = 50,
-        max_pages: int = 6,
+        max_pages: int = 20,
         auto_increase_pages: bool = True,
     ):
         """
@@ -79,7 +79,7 @@ class AdzunaFetcher(BaseFetcher):
         # Use NO salary filter at API level to get maximum results
         # We'll filter to the target salary locally for more control and better coverage
         api_salary_min = None  # No API filter - cast widest net
-        target_salary = profile.get("salary_min", 130000)
+        target_salary = profile.get("salary_target", 130000)
         
         # Get keywords from profile
         keywords = profile.get("title_keywords", ["data engineer"])
@@ -122,7 +122,7 @@ class AdzunaFetcher(BaseFetcher):
                                 jobs_from_location.append(job)
                                 new_jobs += 1
                         
-                        time.sleep(0.5)  # Rate limiting
+                        time.sleep(1.5)  # Rate limiting
                         
                         # If we got a full page, we might be hitting the limit
                         if len(jobs) >= self.results_per_page:
@@ -175,10 +175,14 @@ class AdzunaFetcher(BaseFetcher):
         # Only add where if it's not empty
         if where:
             params["where"] = where
-            
+
         # Add salary filter if provided
         if salary_min:
             params["salary_min"] = salary_min
+
+        # Filter to recent postings server-side to maximize coverage
+        # within our page budget (matches profile.yaml max_job_age_days)
+        params["max_days_old"] = 60
         
         try:
             response = requests.get(url, params=params, timeout=15)

@@ -65,7 +65,7 @@ def profile_yaml_file(tmp_path: Path) -> Path:
         "title_keywords": ["data engineer", "analytics engineer"],
         "skills": ["SQL", "Python", "dbt"],
         "location_preference": "remote",
-        "salary_min": 130000,
+        "salary_target": 130000,
         "freeform_preferences": "Experienced data professional.",
     }
     path = tmp_path / "profile.yaml"
@@ -593,11 +593,11 @@ class TestApplyApprovedSuggestions:
         _insert_suggestion(
             db_conn,
             suggestion_type="set_field",
-            suggested_change={"key": "salary_min", "value": 150000},
+            suggested_change={"key": "salary_target", "value": 150000},
         )
         apply_approved_suggestions(db_conn, profile_yaml_file)
         updated = yaml.safe_load(profile_yaml_file.read_text(encoding="utf-8"))
-        assert updated["salary_min"] == 150000
+        assert updated["salary_target"] == 150000
 
     def test_atomic_write_creates_valid_yaml(
         self,

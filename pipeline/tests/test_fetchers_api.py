@@ -86,7 +86,7 @@ REMOTEOK_RESPONSE: list[Any] = [
 
 MOCK_PROFILE: dict[str, Any] = {
     "title_keywords": ["data engineer"],
-    "salary_min": 130000,
+    "salary_target": 130000,
     "locations": ["Florida", "Remote"],
 }
 
@@ -419,7 +419,7 @@ class TestRemoteOKFetcherFetch:
         mock_load_profile: MagicMock,
     ) -> None:
         """When profile has no keywords, all jobs are returned unfiltered."""
-        mock_load_profile.return_value = {"title_keywords": [], "salary_min": 100000}
+        mock_load_profile.return_value = {"title_keywords": [], "salary_target": 100000}
         mock_get.return_value = self._mock_response(REMOTEOK_RESPONSE)
 
         fetcher = RemoteOKFetcher()

@@ -235,7 +235,7 @@ def filter_jobs(jobs: list[Job]) -> list[Job]:
     profile = load_profile()
     red_flags = load_red_flags()
     max_age_days = profile.get("max_job_age_days", 90)
-    min_salary = profile.get("salary_min", 100000)
+    min_salary = profile.get("salary_target", 100000)
     title_keywords = profile.get("title_keywords", [])
     
     initial_count = len(jobs)
@@ -327,7 +327,7 @@ def run_prefilter(db_connection: sqlite3.Connection) -> dict[str, int]:
     profile = load_profile()
     red_flags = load_red_flags()
     max_age_days: int = profile.get("max_job_age_days", 90)
-    min_salary: int = profile.get("salary_min", 100000)
+    min_salary: int = profile.get("salary_target", 100000)
 
     # Fetch jobs with no score_dimensions entry of any pass.
     unscored_rows = db_connection.execute(

@@ -80,7 +80,7 @@ Each suggestion object must have exactly these fields:
     "description": "Increase minimum salary threshold to 140000",
     "reasoning": "Most thumbs_down jobs had salary_max below 130000; raising threshold reduces noise.",
     "suggested_change": {
-      "key": "salary_min",
+      "key": "salary_target",
       "value": 140000
     }
   }

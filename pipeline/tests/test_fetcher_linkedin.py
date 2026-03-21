@@ -51,7 +51,7 @@ LINKEDIN_JOB_2: dict[str, Any] = {
 
 MOCK_PROFILE: dict[str, Any] = {
     "title_keywords": ["data engineer"],
-    "salary_min": 130000,
+    "salary_target": 130000,
 }
 
 
