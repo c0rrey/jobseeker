@@ -306,8 +306,8 @@ def _print_fetch_summary(summary: dict[str, Any]) -> None:
 def _print_enrich_summary(summary: dict[str, Any]) -> None:
     """Print a human-readable enrichment stage summary to stdout."""
     processed = summary.get("companies_processed", 0)
-    succeeded = summary.get("sources_succeeded", {})
-    failed = summary.get("sources_failed", {})
+    succeeded = summary.get("sources_succeeded") or {}
+    failed = summary.get("sources_failed") or {}
     succeeded_total = sum(succeeded.values())
     failed_total = sum(failed.values())
     print(
@@ -344,8 +344,8 @@ def _print_discover_summary(summary: dict[str, Any]) -> None:
 
     if enrichment is not None:
         processed = enrichment.get("companies_processed", 0)
-        succeeded = enrichment.get("sources_succeeded", {})
-        failed = enrichment.get("sources_failed", {})
+        succeeded = enrichment.get("sources_succeeded") or {}
+        failed = enrichment.get("sources_failed") or {}
         succeeded_total = sum(succeeded.values())
         failed_total = sum(failed.values())
         print(
