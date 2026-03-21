@@ -82,58 +82,6 @@ def get_rapidapi_key() -> str:
     return key
 
 
-def get_serpapi_key() -> str:
-    """
-    Get the SerpAPI key from environment variables.
-
-    Used for company discovery via SerpAPI.
-
-    Returns:
-        The SERPAPI_KEY value.
-
-    Raises:
-        ValueError: If SERPAPI_KEY is not set.
-    """
-    key = os.getenv("SERPAPI_KEY")
-    if not key:
-        raise ValueError(
-            "SerpAPI key not found. "
-            "Set the SERPAPI_KEY environment variable."
-        )
-    return key
-
-
-def get_crunchbase_key() -> str:
-    """
-    Get the Crunchbase API key from environment variables.
-
-    Returns:
-        The CRUNCHBASE_API_KEY value.
-
-    Raises:
-        ValueError: If CRUNCHBASE_API_KEY is not set.
-    """
-    key = os.getenv("CRUNCHBASE_API_KEY")
-    if not key:
-        raise ValueError(
-            "Crunchbase API key not found. "
-            "Set the CRUNCHBASE_API_KEY environment variable."
-        )
-    return key
-
-
-def is_crunchbase_enabled() -> bool:
-    """Check whether Crunchbase enrichment is enabled.
-
-    Reads the CRUNCHBASE_ENABLED environment variable. Defaults to False
-    (disabled) since Crunchbase no longer offers a free API tier.
-
-    Returns:
-        True if the variable is set to a truthy value (1, true, yes).
-    """
-    return os.getenv("CRUNCHBASE_ENABLED", "").lower() in ("1", "true", "yes")
-
-
 def get_db_path() -> str:
     """
     Get the database file path from environment variables.

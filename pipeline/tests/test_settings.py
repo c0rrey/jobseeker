@@ -1,9 +1,7 @@
 """Tests for pipeline/config/settings.py.
 
-Covers all getter functions added in seek-3:
+Covers the active getter functions:
 - get_rapidapi_key()
-- get_serpapi_key()
-- get_crunchbase_key()
 - get_db_path()
 
 Also verifies that the existing get_adzuna_credentials() function is unchanged
@@ -18,10 +16,8 @@ import pytest
 from pipeline.config.settings import (
     PROJECT_ROOT,
     get_adzuna_credentials,
-    get_crunchbase_key,
     get_db_path,
     get_rapidapi_key,
-    get_serpapi_key,
 )
 
 
@@ -55,70 +51,6 @@ class TestGetRapidapiKey:
         monkeypatch.delenv("RAPIDAPI_KEY", raising=False)
         with pytest.raises(ValueError, match="(?i)rapidapi"):
             get_rapidapi_key()
-
-
-# ---------------------------------------------------------------------------
-# get_serpapi_key
-# ---------------------------------------------------------------------------
-
-
-class TestGetSerpapiKey:
-    """Tests for get_serpapi_key()."""
-
-    def test_returns_value_when_set(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Returns the env var value when SERPAPI_KEY is set."""
-        monkeypatch.setenv("SERPAPI_KEY", "test-serp-key")
-        assert get_serpapi_key() == "test-serp-key"
-
-    def test_raises_value_error_when_missing(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Raises ValueError with a descriptive message when SERPAPI_KEY is absent."""
-        monkeypatch.delenv("SERPAPI_KEY", raising=False)
-        with pytest.raises(ValueError, match="SERPAPI_KEY"):
-            get_serpapi_key()
-
-    def test_raises_value_error_when_empty_string(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Raises ValueError when SERPAPI_KEY is set to an empty string."""
-        monkeypatch.setenv("SERPAPI_KEY", "")
-        with pytest.raises(ValueError, match="SERPAPI_KEY"):
-            get_serpapi_key()
-
-    def test_error_message_mentions_serpapi(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """The ValueError message references SerpAPI to aid diagnosis."""
-        monkeypatch.delenv("SERPAPI_KEY", raising=False)
-        with pytest.raises(ValueError, match="(?i)serpapi"):
-            get_serpapi_key()
-
-
-# ---------------------------------------------------------------------------
-# get_crunchbase_key
-# ---------------------------------------------------------------------------
-
-
-class TestGetCrunchbaseKey:
-    """Tests for get_crunchbase_key()."""
-
-    def test_returns_value_when_set(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Returns the env var value when CRUNCHBASE_API_KEY is set."""
-        monkeypatch.setenv("CRUNCHBASE_API_KEY", "test-cb-key")
-        assert get_crunchbase_key() == "test-cb-key"
-
-    def test_raises_value_error_when_missing(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Raises ValueError with a descriptive message when CRUNCHBASE_API_KEY is absent."""
-        monkeypatch.delenv("CRUNCHBASE_API_KEY", raising=False)
-        with pytest.raises(ValueError, match="CRUNCHBASE_API_KEY"):
-            get_crunchbase_key()
-
-    def test_raises_value_error_when_empty_string(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Raises ValueError when CRUNCHBASE_API_KEY is set to an empty string."""
-        monkeypatch.setenv("CRUNCHBASE_API_KEY", "")
-        with pytest.raises(ValueError, match="CRUNCHBASE_API_KEY"):
-            get_crunchbase_key()
-
-    def test_error_message_mentions_crunchbase(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """The ValueError message references Crunchbase to aid diagnosis."""
-        monkeypatch.delenv("CRUNCHBASE_API_KEY", raising=False)
-        with pytest.raises(ValueError, match="(?i)crunchbase"):
-            get_crunchbase_key()
 
 
 # ---------------------------------------------------------------------------
@@ -208,8 +140,6 @@ class TestDotenvLoading:
 
         assert hasattr(settings, "PROJECT_ROOT")
         assert hasattr(settings, "get_rapidapi_key")
-        assert hasattr(settings, "get_serpapi_key")
-        assert hasattr(settings, "get_crunchbase_key")
         assert hasattr(settings, "get_db_path")
 
     def test_project_root_resolves_correctly(self) -> None:
