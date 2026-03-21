@@ -285,7 +285,7 @@ def write_pass1_results(
             confidence: int = _safe_int(result.get("confidence", 0))
             reasoning: str | None = result.get("reasoning")
 
-            overall: int = 0 if verdict == "no" else confidence
+            overall: int = confidence if verdict == "yes" else 0
 
             db_connection.execute(
                 """
