@@ -169,8 +169,10 @@ def _fetch_qualifying_jobs(conn: sqlite3.Connection) -> list[_Job]:
     """Fetch jobs eligible for duplicate detection.
 
     Excludes rows where description IS NULL or shorter than
-    _MIN_DESCRIPTION_LEN characters.  Rows are ordered by id ASC to ensure
-    the lowest-ID representative is deterministic.
+    _MIN_DESCRIPTION_LEN characters.  Also excludes rows where the normalised
+    company name is an empty string, which would otherwise cause unrelated jobs
+    to be false-positive grouped under the same empty company_key.  Rows are
+    ordered by id ASC to ensure the lowest-ID representative is deterministic.
 
     Args:
         conn: An open SQLite connection.
@@ -189,11 +191,12 @@ def _fetch_qualifying_jobs(conn: sqlite3.Connection) -> list[_Job]:
     return [
         _Job(
             id=row[0],
-            company_key=row[1].strip().lower(),
+            company_key=company_key,
             title=(row[2] or "").strip().lower(),
             description=row[3],
         )
         for row in rows
+        if (company_key := row[1].strip().lower())
     ]
 
 

@@ -335,6 +335,39 @@ class TestDetectDuplicatesGrouping:
         assert summary.groups_created == 1
         assert summary.jobs_grouped == 2
 
+    def test_empty_company_name_excluded_from_grouping(
+        self, db_conn: sqlite3.Connection
+    ) -> None:
+        """Jobs with an empty (or all-whitespace) company name must not be grouped.
+
+        Before the fix, company_key="" caused all such jobs to share the same
+        bucket in the by_company dict, producing false-positive duplicate groups
+        among unrelated jobs that simply had no company name.
+        """
+        # Two jobs with identical long descriptions but no company name.
+        # They must NOT be grouped together.
+        id_a = _insert_job(db_conn, company="", description=_LONG_DESC)
+        id_b = _insert_job(db_conn, company="   ", description=_LONG_DESC)
+        # A normal job at a real company must still form its own valid group.
+        id_c = _insert_job(db_conn, company="RealCo", description=_LONG_DESC)
+        id_d = _insert_job(db_conn, company="RealCo", description=_LONG_DESC)
+
+        summary = detect_duplicates(db_conn)
+
+        # Only the two RealCo jobs should form a group.
+        assert summary.groups_created == 1
+        assert summary.jobs_grouped == 2
+
+        # Empty-company jobs must remain ungrouped.
+        assert _fetch_job_row(db_conn, id_a)["dup_group_id"] is None
+        assert _fetch_job_row(db_conn, id_b)["dup_group_id"] is None
+
+        # RealCo jobs must still be grouped correctly.
+        group_id_c = _fetch_job_row(db_conn, id_c)["dup_group_id"]
+        group_id_d = _fetch_job_row(db_conn, id_d)["dup_group_id"]
+        assert group_id_c is not None
+        assert group_id_c == group_id_d
+
     def test_two_independent_groups_from_two_companies(
         self, db_conn: sqlite3.Connection
     ) -> None:
