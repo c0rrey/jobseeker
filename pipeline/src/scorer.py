@@ -87,6 +87,13 @@ def compute_profile_hash(profile_yaml: str, snapshot_yaml: str = "") -> str:
     return hashlib.sha256(combined.encode("utf-8")).hexdigest()
 
 
+# SQL fragment applied to all scorer queries to exclude non-representative
+# duplicates.  Jobs with dup_group_id IS NULL are ungrouped (unique) and are
+# always included.  Within a duplicate group, only the job flagged
+# is_representative = 1 is included so only one copy is sent to the LLM.
+_DUP_FILTER = "AND (j.dup_group_id IS NULL OR j.is_representative = 1)"
+
+
 # ---------------------------------------------------------------------------
 # Query functions
 # ---------------------------------------------------------------------------
@@ -100,6 +107,10 @@ def get_unscored_jobs(db_connection: sqlite3.Connection) -> list[dict[str, Any]]
     a job that has only a Pass 2 row is correctly identified as having no
     Pass 1 score.
 
+    Non-representative duplicates are excluded via :data:`_DUP_FILTER`:
+    jobs with ``dup_group_id IS NOT NULL AND is_representative = 0`` are
+    skipped.  Ungrouped jobs (``dup_group_id IS NULL``) are always returned.
+
     The ``description`` value in each returned dict is resolved via COALESCE:
     ``full_description`` is preferred when non-NULL, falling back to the
     truncated ``description`` column.  The value is capped at
@@ -111,6 +122,7 @@ def get_unscored_jobs(db_connection: sqlite3.Connection) -> list[dict[str, Any]]
 
     Returns:
         List of dicts with keys: id, title, company, location, description.
+        At most one job per duplicate group (the representative).
         Empty list when all jobs have been scored.
     """
     cursor = db_connection.execute(
@@ -130,6 +142,7 @@ def get_unscored_jobs(db_connection: sqlite3.Connection) -> list[dict[str, Any]]
             SELECT 1 FROM score_dimensions sd0
             WHERE sd0.job_id = j.id AND sd0.pass = {PASS_REJECTED}
           )
+          {_DUP_FILTER}
         ORDER BY j.id
         """,
         {"pass": PASS_1},
@@ -147,6 +160,10 @@ def get_stale_scored_jobs(
     ``profile_hash`` that differs from ``current_profile_hash``.  This
     triggers re-scoring so that the candidate profile changes are reflected.
 
+    Non-representative duplicates are excluded via :data:`_DUP_FILTER` to
+    prevent stale rescoring from overwriting propagated scores on duplicate
+    copies.  Ungrouped jobs (``dup_group_id IS NULL``) are always returned.
+
     The ``description`` value in each returned dict is resolved via COALESCE:
     ``full_description`` is preferred when non-NULL, falling back to the
     truncated ``description`` column.  The value is capped at
@@ -160,6 +177,7 @@ def get_stale_scored_jobs(
 
     Returns:
         List of dicts with keys: id, title, company, location, description.
+        At most one job per duplicate group (the representative).
         Empty list when no stale rows exist.
     """
     cursor = db_connection.execute(
@@ -174,8 +192,9 @@ def get_stale_scored_jobs(
         FROM jobs j
         INNER JOIN score_dimensions sd
             ON sd.job_id = j.id AND sd.pass = :pass
-        WHERE sd.profile_hash != :current_hash
-           OR sd.profile_hash IS NULL
+        WHERE (sd.profile_hash != :current_hash
+           OR sd.profile_hash IS NULL)
+          {_DUP_FILTER}
         ORDER BY j.id
         """,
         {"pass": PASS_1, "current_hash": current_profile_hash},
@@ -335,6 +354,10 @@ def get_pass1_survivors(
     This mirrors the staleness logic used by :func:`get_stale_scored_jobs` for
     Pass 1, applied to Pass 2 rows.
 
+    Non-representative duplicates are excluded via :data:`_DUP_FILTER` so
+    only the representative from each group advances to deep scoring.
+    Ungrouped jobs (``dup_group_id IS NULL``) are always returned.
+
     When ``current_profile_hash`` is empty (first run before any profile
     snapshot exists), all Pass 1 survivors with no Pass 2 row are returned.
 
@@ -357,6 +380,7 @@ def get_pass1_survivors(
         characters; this is larger than the Pass 1 cap because the deep scorer
         processes far fewer jobs per batch.
 
+        At most one job per duplicate group (the representative).
         Empty list when no jobs require Pass 2 scoring.
     """
     cursor = db_connection.execute(
@@ -377,10 +401,12 @@ def get_pass1_survivors(
             ON sd1.job_id = j.id AND sd1.pass = :pass1 AND sd1.overall > {PASS_REJECTED}
         LEFT JOIN score_dimensions sd2
             ON sd2.job_id = j.id AND sd2.pass = :pass2
-        WHERE
+        WHERE (
             sd2.id IS NULL
             OR sd2.profile_hash IS NULL
             OR sd2.profile_hash != :current_hash
+        )
+          {_DUP_FILTER}
         ORDER BY sd1.overall DESC, j.id
         """,
         {"pass1": PASS_1, "pass2": PASS_2, "current_hash": current_profile_hash},

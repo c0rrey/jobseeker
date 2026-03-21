@@ -43,6 +43,7 @@ from pipeline.scripts.discover_companies import (
 from pipeline.src.company_discovery import discover_company
 from pipeline.src.database import get_connection, init_db
 from pipeline.src.deduplicator import deduplicate_and_insert
+from pipeline.src.duplicate_detector import detect_duplicates
 from pipeline.src.enrichment.orchestrator import run_enrichment
 from pipeline.src.fetchers import (
     AdzunaFetcher,
@@ -101,8 +102,10 @@ def run_fetch(db_path: str) -> dict[str, Any]:
         db_path: Filesystem path of the SQLite database.
 
     Returns:
-        A dict with keys ``"fetched"`` (total raw records) and ``"inserted"``
-        and ``"updated"`` (deduplicator counts).
+        A dict with keys ``"fetched"`` (total raw records), ``"inserted"``
+        and ``"updated"`` (deduplicator counts), ``"dup_groups"`` (number of
+        duplicate groups detected), ``"dup_jobs"`` (total jobs in groups), and
+        ``"dup_representatives"`` (number of jobs marked as representative).
     """
     conn = get_connection(db_path)
     try:
@@ -165,10 +168,22 @@ def run_fetch(db_path: str) -> dict[str, Any]:
         inserted, updated = deduplicate_and_insert(jobs, conn)
         conn.commit()
 
+        # --- Content-based duplicate detection ------------------------------
+        dup_summary = detect_duplicates(conn)
+        logger.info(
+            "Detected %d duplicate groups covering %d jobs; scoring %d representatives",
+            dup_summary.groups_created,
+            dup_summary.jobs_grouped,
+            dup_summary.representatives_set,
+        )
+
         return {
             "fetched": len(all_job_pairs),
             "inserted": inserted,
             "updated": updated,
+            "dup_groups": dup_summary.groups_created,
+            "dup_jobs": dup_summary.jobs_grouped,
+            "dup_representatives": dup_summary.representatives_set,
         }
     finally:
         conn.close()
