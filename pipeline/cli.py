@@ -1,14 +1,19 @@
 """
 CLI entry point for the jseeker V2 pipeline.
 
-Provides four mutually exclusive stage flags:
+Provides five mutually exclusive stage flags:
 
   --fetch      Run all API fetchers (Adzuna, RemoteOK, LinkedIn), ATS feed
                fetcher, and career page crawler, then deduplicate and insert
                into the database.
   --enrich     Run the enrichment orchestrator on companies needing enrichment.
   --prefilter  Run the deterministic pre-filter on unfiltered jobs.
+  --discover   Auto-discover companies from Pass 1 survivors and trigger
+               enrichment for newly discovered companies.  Must be run after
+               Pass 1 scoring (which is handled by Claude Code subagents).
   --all        Run fetch, enrich, and prefilter in sequence.
+               Note: --discover is NOT included in --all because it requires
+               Pass 1 scoring to have completed first.
 
 Note: Scoring and other LLM-based stages are handled by Claude Code subagents
 and are not exposed through this CLI.
@@ -19,6 +24,7 @@ Usage::
     python pipeline/cli.py --fetch
     python pipeline/cli.py --enrich
     python pipeline/cli.py --prefilter
+    python pipeline/cli.py --discover
     python pipeline/cli.py --all
 """
 
@@ -30,6 +36,11 @@ import sys
 from typing import Any
 
 from pipeline.config.settings import get_db_path
+from pipeline.scripts.discover_companies import (
+    _get_existing_survivor_company_count,
+    _get_new_survivor_companies,
+)
+from pipeline.src.company_discovery import discover_company
 from pipeline.src.database import get_connection, init_db
 from pipeline.src.deduplicator import deduplicate_and_insert
 from pipeline.src.enrichment.orchestrator import run_enrichment
@@ -198,6 +209,85 @@ def run_prefilter(db_path: str) -> dict[str, int]:
         conn.close()
 
 
+def run_discover(db_path: str) -> dict[str, Any]:
+    """Auto-discover companies from Pass 1 survivors and enrich them.
+
+    Queries the database for jobs that passed Pass 1 scoring (score_dimensions
+    pass=1, overall > 0), identifies distinct company names not yet in the
+    companies table, calls :func:`discover_company` for each new name, and
+    triggers :func:`run_enrichment` once all discoveries are complete.
+
+    This stage must be invoked *after* Pass 1 scoring has completed.  It is
+    intentionally excluded from ``--all`` because Pass 1 is handled by Claude
+    Code subagents outside this CLI.
+
+    Args:
+        db_path: Filesystem path of the SQLite database.
+
+    Returns:
+        A dict with keys:
+
+        - ``"new_discovered"`` (int): companies successfully discovered.
+        - ``"already_existing"`` (int): Pass 1 survivor companies already in
+          the companies table before this run.
+        - ``"discovery_failed"`` (int): companies that could not be discovered.
+        - ``"enrichment"`` (dict | None): the :class:`EnrichmentSummary` dict
+          returned by :func:`run_enrichment`, or ``None`` if enrichment was
+          skipped because no new companies were discovered.
+    """
+    conn = get_connection(db_path)
+    try:
+        new_companies = _get_new_survivor_companies(conn)
+        already_existing = _get_existing_survivor_company_count(conn)
+    except Exception:
+        logger.exception("discover: failed to query Pass 1 survivors")
+        conn.close()
+        raise
+
+    logger.info(
+        "discover: %d new companies to discover, %d already existing",
+        len(new_companies),
+        already_existing,
+    )
+
+    discovered = 0
+    failed = 0
+
+    for company_name in new_companies:
+        logger.info("discover: discovering '%s'", company_name)
+        try:
+            result = discover_company(company_name, conn)
+        except Exception:
+            logger.warning("discover: unexpected error discovering '%s'", company_name, exc_info=True)
+            failed += 1
+            continue
+
+        if result is not None:
+            discovered += 1
+            logger.info("discover: '%s' discovered (company_id=%s)", company_name, result.company_id)
+        else:
+            failed += 1
+            logger.warning("discover: '%s' returned None — skipped", company_name)
+
+    enrichment_summary: dict[str, Any] | None = None
+    if discovered > 0:
+        logger.info("discover: running enrichment for %d newly discovered companies", discovered)
+        try:
+            enrichment_summary = dict(run_enrichment(conn))
+        except Exception:
+            logger.exception("discover: enrichment run failed")
+            # Non-fatal — discovery succeeded; enrichment can be retried via --enrich.
+
+    conn.close()
+
+    return {
+        "new_discovered": discovered,
+        "already_existing": already_existing,
+        "discovery_failed": failed,
+        "enrichment": enrichment_summary,
+    }
+
+
 # ---------------------------------------------------------------------------
 # Summary printers
 # ---------------------------------------------------------------------------
@@ -238,6 +328,35 @@ def _print_prefilter_summary(summary: dict[str, int]) -> None:
     )
 
 
+def _print_discover_summary(summary: dict[str, Any]) -> None:
+    """Print a human-readable discovery stage summary to stdout."""
+    new_discovered = summary.get("new_discovered", 0)
+    already_existing = summary.get("already_existing", 0)
+    discovery_failed = summary.get("discovery_failed", 0)
+    enrichment = summary.get("enrichment")
+
+    print(
+        f"Discover complete. "
+        f"New companies discovered: {new_discovered}, "
+        f"already existing: {already_existing}, "
+        f"discovery failed: {discovery_failed}."
+    )
+
+    if enrichment is not None:
+        processed = enrichment.get("companies_processed", 0)
+        succeeded = enrichment.get("sources_succeeded", {})
+        failed = enrichment.get("sources_failed", {})
+        succeeded_total = sum(succeeded.values())
+        failed_total = sum(failed.values())
+        print(
+            f"  Enrichment: processed {processed} companies "
+            f"({succeeded_total} source calls succeeded, "
+            f"{failed_total} failed)."
+        )
+    elif new_discovered == 0:
+        print("  Enrichment skipped: no new companies discovered.")
+
+
 # ---------------------------------------------------------------------------
 # Argument parser
 # ---------------------------------------------------------------------------
@@ -263,6 +382,7 @@ def _build_parser() -> argparse.ArgumentParser:
             "  python pipeline/cli.py --fetch\n"
             "  python pipeline/cli.py --enrich\n"
             "  python pipeline/cli.py --prefilter\n"
+            "  python pipeline/cli.py --discover\n"
             "  python pipeline/cli.py --all\n"
         ),
     )
@@ -287,9 +407,22 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Run the deterministic pre-filter on unfiltered jobs.",
     )
     group.add_argument(
+        "--discover",
+        action="store_true",
+        help=(
+            "Auto-discover companies from Pass 1 survivors and trigger "
+            "enrichment for newly discovered companies. "
+            "Run after Pass 1 scoring completes (handled by subagents). "
+            "NOT included in --all."
+        ),
+    )
+    group.add_argument(
         "--all",
         action="store_true",
-        help="Run fetch, enrich, and prefilter in sequence.",
+        help=(
+            "Run fetch, enrich, and prefilter in sequence. "
+            "Does NOT include --discover (requires Pass 1 scoring first)."
+        ),
     )
 
     parser.add_argument(
@@ -324,7 +457,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     # No stage selected — print help and exit cleanly.
-    if not any([args.fetch, args.enrich, args.prefilter, args.all]):
+    if not any([args.fetch, args.enrich, args.prefilter, args.discover, args.all]):
         parser.print_help()
         return 0
 
@@ -346,6 +479,10 @@ def main(argv: list[str] | None = None) -> int:
         elif args.prefilter:
             summary = run_prefilter(db_path)
             _print_prefilter_summary(summary)
+
+        elif args.discover:
+            summary = run_discover(db_path)
+            _print_discover_summary(summary)
 
         elif args.all:
             logger.info("Running all stages: fetch -> prefilter -> enrich")
