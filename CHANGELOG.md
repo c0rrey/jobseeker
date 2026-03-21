@@ -1,5 +1,43 @@
 # Changelog
 
+## 2026-03-21 — Session 20260320-233459 (Code Quality Sweep — P3 Polish Wave)
+
+### Summary
+
+Session completed 17 tasks across one parallel implementation wave and one review fix cycle. All 15 Wave 1 tasks were P3 fixes inherited from the prior session (seek-95 through seek-109), addressing type annotation style, defensive hardening, connection lifecycle, dead code, CLI argument consistency, and documentation accuracy. Two review rounds ran: round 1 found 2 P2 issues (misleading `get_connection` context manager docstring and a missing `try/finally` in `fetch_descriptions.py:run()`) plus 5 P3 items; both P2s were fixed in a same-session fix wave (seek-110, seek-111); round 2 returned a CLEAN PASS. 5 P3 issues filed as seek-112 through seek-116 for the next session. 18 commits, 17 tasks closed.
+
+### Implementation (Wave 1 — Code Quality, 4 parallel agents)
+
+- **seek-98**: refactor: replace `Optional[str]` with `str | None` union syntax in `full_description_fetcher.py` (`21ac94a`)
+- **seek-95**: fix(prompts): clarify soft vs hard salary threshold roles in `fast_filter.md` and `profile.yaml` comments (`84089ba`)
+- **seek-96**: fix: remove dead `skipped` variable and its always-zero log reference in `fetch_descriptions.py` (`f1f1708`)
+- **seek-97**: fix: rename `--db-path` to `--db` in `fetch_descriptions.py` to match CLI convention (`334d3bf`)
+- **seek-99**: refactor: move misplaced helpers under correct section headers in `database.py` and `scorer.py` (`31ad864`)
+- **seek-100**: fix: document `pass=0` sentinel as `PASS_REJECTED` constant in `scorer.py` (`3868837`)
+- **seek-101**: docs: add `reasoning` field to `write_pass1_results` docstring in `scorer.py` (`19bcd26`)
+- **seek-102**: fix: add `try/finally` connection cleanup to `run_discover` in `cli.py` (`ad9340b`)
+- **seek-103**: fix: guard `sources_succeeded`/`sources_failed` against explicit `None` in summary printers (`da8aaa6`)
+- **seek-104**: fix: use `time.monotonic()` instead of `time.time()` in rate limiter (`316eabd`)
+- **seek-105**: fix: guard against `None` URL in `fetch_full_description` before attribute access (`b07cbd3`)
+- **seek-106**: fix: reject non-positive `limit` values in `fetch_descriptions` with `ValueError` (`76cf903`)
+- **seek-107**: fix: raise `FileNotFoundError` on missing DB path in `get_connection` instead of silent creation (`769cb79`)
+- **seek-108**: fix: correct regex ordering in `_clean_text` — second substitution was a no-op (`d91f57f`)
+- **seek-109**: fix: replace stale line-number cross-reference with constant name in `scorer.py` (`73c6118`)
+
+### Review Fixes (Round 1 — P2s)
+
+- **seek-110**: fix: clarify `get_connection` docstring — sqlite3 context manager commits/rolls back only, does not close (`c05c6dd`)
+- **seek-111**: fix: wrap `run()` body in `try/finally` to guarantee `conn.close()` in `fetch_descriptions.py` (`b036084`)
+
+### Review Statistics
+
+| Round | Scope | P1 | P2 | P3 | Verdict |
+|-------|-------|----|----|----|---------|
+| 1 | 15 tasks, 8 files | 0 | 2 | 5 | PASS WITH ISSUES |
+| 2 | 2 fix tasks, 2 files | 0 | 0 | 0 | CLEAN PASS |
+
+7 root causes consolidated from 10 raw findings. Both P2s auto-fixed same session; 5 P3s filed as seek-112 through seek-116.
+
 ## 2026-03-20 — Session 20260320-220445 (Full-Description Enrichment, Company Discovery, Salary Templating)
 
 ### Summary
