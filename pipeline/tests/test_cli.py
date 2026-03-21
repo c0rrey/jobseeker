@@ -448,7 +448,7 @@ class TestEnrichStage:
     ) -> dict[str, Any]:
         return {
             "companies_processed": companies_processed,
-            "sources_succeeded": succeeded or {"crunchbase": 3, "glassdoor": 2},
+            "sources_succeeded": succeeded or {"glassdoor": 3, "levelsfy": 2},
             "sources_failed": failed or {"glassdoor": 1},
         }
 
@@ -472,7 +472,7 @@ class TestEnrichStage:
     ) -> None:
         summary = self._enrich_summary(
             companies_processed=5,
-            succeeded={"crunchbase": 5, "glassdoor": 4},
+            succeeded={"glassdoor": 5, "levelsfy": 4},
             failed={"glassdoor": 1},
         )
         with (
@@ -543,7 +543,7 @@ class TestAllStage:
     ) -> None:
         enrich_summary = {
             "companies_processed": 2,
-            "sources_succeeded": {"crunchbase": 2},
+            "sources_succeeded": {"levelsfy": 2},
             "sources_failed": {},
         }
         pf_summary = {"examined": 5, "filtered": 1, "passed": 4}
@@ -718,7 +718,7 @@ class TestSummaryPrinters:
     def test_print_enrich_summary(self, capsys: pytest.CaptureFixture) -> None:
         _print_enrich_summary({
             "companies_processed": 7,
-            "sources_succeeded": {"crunchbase": 6, "glassdoor": 5},
+            "sources_succeeded": {"glassdoor": 6, "levelsfy": 5},
             "sources_failed": {"glassdoor": 2},
         })
         out = capsys.readouterr().out
