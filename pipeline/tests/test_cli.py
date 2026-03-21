@@ -1299,18 +1299,6 @@ class TestFetchDescriptionsStage:
 class TestAllStageFetchDescriptions:
     """Tests that verify fetch-descriptions is wired into --all correctly."""
 
-    def _make_all_patches(
-        self,
-        mock_conn: MagicMock,
-        fake_db_path: str,
-        fd_summary: dict[str, int] | None = None,
-        fd_side_effect: Exception | None = None,
-    ) -> tuple[Any, ...]:
-        """Return a tuple of patch context args used in --all tests."""
-        # Returned by callers to be used with contextlib.ExitStack or multiple
-        # patch() calls in a with statement.
-        return ()  # Not used directly — patches are applied inline in each test.
-
     def test_all_four_stages_run(
         self, fake_db_path: str, mock_conn: MagicMock
     ) -> None:
