@@ -45,6 +45,7 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 BATCH_SIZE: int = 40
+PASS_REJECTED: int = 0  # sentinel: job was filtered out / not scored
 PASS_1: int = 1
 PASS_2: int = 2
 
@@ -127,7 +128,7 @@ def get_unscored_jobs(db_connection: sqlite3.Connection) -> list[dict[str, Any]]
         WHERE sd.id IS NULL
           AND NOT EXISTS (
             SELECT 1 FROM score_dimensions sd0
-            WHERE sd0.job_id = j.id AND sd0.pass = 0
+            WHERE sd0.job_id = j.id AND sd0.pass = {PASS_REJECTED}
           )
         ORDER BY j.id
         """,
@@ -372,7 +373,7 @@ def get_pass1_survivors(
             j.company_id
         FROM jobs j
         INNER JOIN score_dimensions sd1
-            ON sd1.job_id = j.id AND sd1.pass = :pass1 AND sd1.overall > 0
+            ON sd1.job_id = j.id AND sd1.pass = :pass1 AND sd1.overall > {PASS_REJECTED}
         LEFT JOIN score_dimensions sd2
             ON sd2.job_id = j.id AND sd2.pass = :pass2
         WHERE
