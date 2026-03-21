@@ -238,7 +238,7 @@ _BUSY_TIMEOUT_MS: int = 5000
 
 
 def _apply_connection_settings(conn: sqlite3.Connection) -> None:
-    """Apply WAL mode and busy_timeout to an open connection.
+    """Apply WAL mode, busy_timeout, and foreign_keys = ON to an open connection.
 
     Args:
         conn: An open SQLite connection.
@@ -277,13 +277,14 @@ def init_db(db_path: str | Path) -> None:
             for idx_sql in index_sqls:
                 conn.execute(idx_sql)
         # Migration: rename skills_gap → skills_match for existing databases.
-        # PRAGMA table_info returns one row per column; column 1 is the name.
+        # PRAGMA table_info returns (cid, name, type, notnull, dflt_value, pk); [1] is the column name.
         cols = {row[1] for row in conn.execute("PRAGMA table_info(score_dimensions)")}
         if "skills_gap" in cols:
             conn.execute(
                 "ALTER TABLE score_dimensions RENAME COLUMN skills_gap TO skills_match"
             )
         # Migration: add full_description column to jobs for existing databases.
+        # PRAGMA table_info returns (cid, name, type, notnull, dflt_value, pk); [1] is the column name.
         jobs_cols = {row[1] for row in conn.execute("PRAGMA table_info(jobs)")}
         if "full_description" not in jobs_cols:
             conn.execute("ALTER TABLE jobs ADD COLUMN full_description TEXT")
