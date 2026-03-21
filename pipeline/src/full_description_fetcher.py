@@ -12,7 +12,6 @@ from __future__ import annotations
 import logging
 import re
 import time
-from typing import Optional
 
 import requests
 from bs4 import BeautifulSoup
@@ -72,7 +71,7 @@ class FullDescriptionFetcher:
         text = re.sub(r"\n\s*\n\s*\n+", "\n\n", text)
         return text.strip()
 
-    def _extract_adzuna_description(self, soup: BeautifulSoup) -> Optional[str]:
+    def _extract_adzuna_description(self, soup: BeautifulSoup) -> str | None:
         """Extract a job description from an Adzuna job page.
 
         Tries multiple selectors in order of specificity, falling back to the
@@ -104,7 +103,7 @@ class FullDescriptionFetcher:
 
         return None
 
-    def _extract_remoteok_description(self, soup: BeautifulSoup) -> Optional[str]:
+    def _extract_remoteok_description(self, soup: BeautifulSoup) -> str | None:
         """Extract a job description from a RemoteOK job page.
 
         Args:
@@ -127,7 +126,7 @@ class FullDescriptionFetcher:
 
     def _extract_generic_description(
         self, soup: BeautifulSoup, url: str
-    ) -> Optional[str]:
+    ) -> str | None:
         """Extract a job description from an unrecognised job board.
 
         Iterates a prioritised list of common CSS selectors and returns the
@@ -162,7 +161,7 @@ class FullDescriptionFetcher:
 
         return None
 
-    def fetch_full_description(self, url: str, source: str) -> Optional[str]:
+    def fetch_full_description(self, url: str, source: str) -> str | None:
         """Fetch and parse the full job description at *url*.
 
         Enforces rate limiting before each request. Network errors and HTML
