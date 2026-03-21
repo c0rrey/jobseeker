@@ -67,8 +67,8 @@ class FullDescriptionFetcher:
         Returns:
             Text with collapsed whitespace and trimmed edges.
         """
-        text = re.sub(r"\s+", " ", text)
-        text = re.sub(r"\n\s*\n\s*\n+", "\n\n", text)
+        text = re.sub(r"\n{3,}", "\n\n", text)
+        text = re.sub(r"[^\S\n]+", " ", text)
         return text.strip()
 
     def _extract_adzuna_description(self, soup: BeautifulSoup) -> str | None:
