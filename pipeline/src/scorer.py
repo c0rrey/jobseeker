@@ -40,13 +40,6 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 
-def _safe_int(value: Any, default: int = 0) -> int:
-    """Convert *value* to int, returning *default* on TypeError or ValueError."""
-    try:
-        return int(value)
-    except (TypeError, ValueError):
-        return default
-
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
@@ -65,6 +58,14 @@ DEEP_SCORER_DESC_CHARS: int = 8000
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+
+def _safe_int(value: Any, default: int = 0) -> int:
+    """Convert *value* to int, returning *default* on TypeError or ValueError."""
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
 
 
 def compute_profile_hash(profile_yaml: str, snapshot_yaml: str = "") -> str:

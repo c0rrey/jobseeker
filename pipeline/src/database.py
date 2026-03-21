@@ -210,7 +210,7 @@ _BUSY_TIMEOUT_MS: int = 5000
 
 
 # ---------------------------------------------------------------------------
-# Public API
+# Internal helpers
 # ---------------------------------------------------------------------------
 
 
@@ -223,6 +223,11 @@ def _apply_connection_settings(conn: sqlite3.Connection) -> None:
     conn.execute(f"PRAGMA busy_timeout = {_BUSY_TIMEOUT_MS};")
     conn.execute("PRAGMA journal_mode = WAL;")
     conn.execute("PRAGMA foreign_keys = ON;")
+
+
+# ---------------------------------------------------------------------------
+# Public API
+# ---------------------------------------------------------------------------
 
 
 def init_db(db_path: str | Path) -> None:
