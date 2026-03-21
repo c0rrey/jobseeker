@@ -237,55 +237,55 @@ def run_discover(db_path: str) -> dict[str, Any]:
     """
     conn = get_connection(db_path)
     try:
-        new_companies = _get_new_survivor_companies(conn)
-        already_existing = _get_existing_survivor_company_count(conn)
-    except Exception:
-        logger.exception("discover: failed to query Pass 1 survivors")
+        try:
+            new_companies = _get_new_survivor_companies(conn)
+            already_existing = _get_existing_survivor_company_count(conn)
+        except Exception:
+            logger.exception("discover: failed to query Pass 1 survivors")
+            raise
+
+        logger.info(
+            "discover: %d new companies to discover, %d already existing",
+            len(new_companies),
+            already_existing,
+        )
+
+        discovered = 0
+        failed = 0
+
+        for company_name in new_companies:
+            logger.info("discover: discovering '%s'", company_name)
+            try:
+                result = discover_company(company_name, conn)
+            except Exception:
+                logger.warning("discover: unexpected error discovering '%s'", company_name, exc_info=True)
+                failed += 1
+                continue
+
+            if result is not None:
+                discovered += 1
+                logger.info("discover: '%s' discovered (company_id=%s)", company_name, result.company_id)
+            else:
+                failed += 1
+                logger.warning("discover: '%s' returned None — skipped", company_name)
+
+        enrichment_summary: dict[str, Any] | None = None
+        if discovered > 0:
+            logger.info("discover: running enrichment for %d newly discovered companies", discovered)
+            try:
+                enrichment_summary = dict(run_enrichment(conn))
+            except Exception:
+                logger.exception("discover: enrichment run failed")
+                # Non-fatal — discovery succeeded; enrichment can be retried via --enrich.
+
+        return {
+            "new_discovered": discovered,
+            "already_existing": already_existing,
+            "discovery_failed": failed,
+            "enrichment": enrichment_summary,
+        }
+    finally:
         conn.close()
-        raise
-
-    logger.info(
-        "discover: %d new companies to discover, %d already existing",
-        len(new_companies),
-        already_existing,
-    )
-
-    discovered = 0
-    failed = 0
-
-    for company_name in new_companies:
-        logger.info("discover: discovering '%s'", company_name)
-        try:
-            result = discover_company(company_name, conn)
-        except Exception:
-            logger.warning("discover: unexpected error discovering '%s'", company_name, exc_info=True)
-            failed += 1
-            continue
-
-        if result is not None:
-            discovered += 1
-            logger.info("discover: '%s' discovered (company_id=%s)", company_name, result.company_id)
-        else:
-            failed += 1
-            logger.warning("discover: '%s' returned None — skipped", company_name)
-
-    enrichment_summary: dict[str, Any] | None = None
-    if discovered > 0:
-        logger.info("discover: running enrichment for %d newly discovered companies", discovered)
-        try:
-            enrichment_summary = dict(run_enrichment(conn))
-        except Exception:
-            logger.exception("discover: enrichment run failed")
-            # Non-fatal — discovery succeeded; enrichment can be retried via --enrich.
-
-    conn.close()
-
-    return {
-        "new_discovered": discovered,
-        "already_existing": already_existing,
-        "discovery_failed": failed,
-        "enrichment": enrichment_summary,
-    }
 
 
 # ---------------------------------------------------------------------------
