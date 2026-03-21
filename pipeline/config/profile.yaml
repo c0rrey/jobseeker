@@ -43,13 +43,8 @@ preferred_locations:
   - Orlando, FL
   - Remote
 
-# Soft-YES salary threshold (annual, USD) — roles that signal compensation below this
-# are a soft negative in the LLM fast-filter vote (may still pass on other merits)
-salary_min: 150000
-
-# Hard-NO salary floor (annual, USD) — roles that explicitly list compensation below
-# this are rejected outright regardless of other factors
-salary_floor: 140000
+salary_min: 150000    # [SOFT] preference threshold — compensation signals below this are a soft negative; role may still pass on other merits
+salary_floor: 140000  # [HARD] floor — roles that explicitly list compensation below this are rejected outright regardless of other factors
 
 # Maximum job age (days) - filter out postings older than this
 max_job_age_days: 90
