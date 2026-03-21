@@ -20,7 +20,7 @@ enrich:
 prefilter:
 	$(PYTHON) -m pipeline.cli --prefilter --db $(DB_PATH)
 
-## Run fetch, enrich, and prefilter in sequence.
+## Run fetch, prefilter, and enrich in sequence.
 all:
 	$(PYTHON) -m pipeline.cli --all --db $(DB_PATH)
 

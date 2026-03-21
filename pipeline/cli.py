@@ -11,7 +11,7 @@ Provides five mutually exclusive stage flags:
   --discover   Auto-discover companies from Pass 1 survivors and trigger
                enrichment for newly discovered companies.  Must be run after
                Pass 1 scoring (which is handled by Claude Code subagents).
-  --all        Run fetch, enrich, and prefilter in sequence.
+  --all        Run fetch, prefilter, and enrich in sequence.
                Note: --discover is NOT included in --all because it requires
                Pass 1 scoring to have completed first.
 
@@ -420,7 +420,7 @@ def _build_parser() -> argparse.ArgumentParser:
         "--all",
         action="store_true",
         help=(
-            "Run fetch, enrich, and prefilter in sequence. "
+            "Run fetch, prefilter, and enrich in sequence. "
             "Does NOT include --discover (requires Pass 1 scoring first)."
         ),
     )

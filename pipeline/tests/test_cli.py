@@ -526,7 +526,7 @@ class TestPrefilterStage:
 
 
 class TestAllStage:
-    """Tests for the --all stage running fetch + enrich + prefilter in sequence."""
+    """Tests for the --all stage running fetch + prefilter + enrich in sequence."""
 
     def test_all_three_stages_run(
         self, fake_db_path: str, mock_conn: MagicMock
