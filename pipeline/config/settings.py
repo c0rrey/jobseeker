@@ -29,14 +29,20 @@ def load_profile() -> dict:
     """Load and return the job search profile from profile.yaml."""
     path = CONFIG_DIR / "profile.yaml"
     with path.open() as f:
-        return yaml.safe_load(f)
+        data = yaml.safe_load(f)
+    if not isinstance(data, dict):
+        raise ValueError(f"Expected a YAML mapping in {path}, got {type(data).__name__}")
+    return data
 
 
 def load_red_flags() -> dict:
     """Load and return red-flag rules from red_flags.yaml."""
     path = CONFIG_DIR / "red_flags.yaml"
     with path.open() as f:
-        return yaml.safe_load(f)
+        data = yaml.safe_load(f)
+    if not isinstance(data, dict):
+        raise ValueError(f"Expected a YAML mapping in {path}, got {type(data).__name__}")
+    return data
 
 
 def get_adzuna_credentials() -> tuple[str, str]:
@@ -90,4 +96,4 @@ def get_db_path() -> str:
         The DB_PATH value if set, otherwise the default ``data/jobs.db``
         relative to the project root.
     """
-    return os.getenv("DB_PATH", str(PROJECT_ROOT / "data" / "jobs.db"))
+    return os.getenv("DB_PATH") or str(PROJECT_ROOT / "data" / "jobs.db")
