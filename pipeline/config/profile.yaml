@@ -5,10 +5,8 @@
 title_keywords:
   - data engineer
   - analytics engineer
-  - product analytics
-  - data analyst
-  - decision systems
-  - product data
+  - applied ai
+  - agentic
 
 # Skills you have / want to use
 skills:
@@ -26,6 +24,9 @@ skills:
   - Git
   - Airflow
   - Workflow orchestration
+  - Claude
+  - LLM
+  - Generative AI
 
 # Industries or company types to avoid
 avoid_industries:
@@ -45,7 +46,7 @@ preferred_locations:
 salary_min: 150000
 
 # Hard-NO salary floor (annual, USD) — roles explicitly below this are rejected outright
-salary_floor: 120000
+salary_floor: 140000
 
 # Maximum job age (days) - filter out postings older than this
 max_job_age_days: 90
@@ -54,7 +55,6 @@ max_job_age_days: 90
 seniority:
   - senior
   - staff
-  - principal
 
 # Optional: Free-form text for LLM-based matching
 # The matcher uses this to understand nuance beyond keyword overlap
@@ -68,3 +68,4 @@ freeform_preferences: |
   Prefer roles with meaningful impact on product strategy and roadmap prioritization.
   Prefer product companies over agencies.
   Interested in AI/ML tooling.
+  Built AI orchestration and memory frameworks.
