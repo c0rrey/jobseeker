@@ -133,7 +133,7 @@ export interface JobRow {
   posted_at: string | null;
   overall: number | null;
   role_fit: number | null;
-  skills_gap: number | null;
+  skills_match: number | null;
   culture_signals: number | null;
   growth_potential: number | null;
   comp_alignment: number | null;
@@ -143,12 +143,14 @@ export interface JobRow {
 export type SortField = "overall" | "salary" | "posted_at";
 export type SortDir = "asc" | "desc";
 export type FeedbackFilter = "all" | "thumbs_up" | "thumbs_down" | "no_feedback";
+export type LocationFilter = "all" | "remote" | "florida";
 
 export interface JobListFilters {
   scoreMin?: number;
   scoreMax?: number;
   company?: string;
   source?: string;
+  location?: LocationFilter;
   feedbackStatus?: FeedbackFilter;
   sortField?: SortField;
   sortDir?: SortDir;
@@ -171,6 +173,7 @@ export function getJobList(filters: JobListFilters = {}): JobRow[] {
     scoreMax,
     company,
     source,
+    location = "all",
     feedbackStatus = "all",
     sortField = "overall",
     sortDir = "desc",
@@ -201,6 +204,72 @@ export function getJobList(filters: JobListFilters = {}): JobRow[] {
     params.push(source.trim());
   }
 
+  // Location filter — Adzuna uses "City, County" format with no state.
+  // "Remote" jobs come through as "US" or "State, US".  Florida jobs are
+  // identified by county name.  Some county names are ambiguous (Orange,
+  // Lake, Marion, Polk) so we match "County, Florida" patterns too.
+  if (location === "remote") {
+    conditions.push(
+      "(j.location = 'US' OR (LOWER(j.location) LIKE '%, us' AND LOWER(j.location) NOT LIKE '%florida%')" +
+      " OR LOWER(j.location) LIKE '%remote%' OR LOWER(j.location) LIKE '%work from home%'" +
+      " OR LOWER(j.location) LIKE '%wfh%' OR LOWER(j.location) LIKE '%telecommute%'" +
+      " OR LOWER(j.location) LIKE '%anywhere%' OR j.location IS NULL OR j.location = '')"
+    );
+  } else if (location === "florida") {
+    conditions.push(
+      "(LOWER(j.location) LIKE '%florida%'" +
+      " OR LOWER(j.location) LIKE '%miami-dade%'" +
+      " OR LOWER(j.location) LIKE '%broward%'" +
+      " OR LOWER(j.location) LIKE '%palm beach%'" +
+      " OR LOWER(j.location) LIKE '%hillsborough%'" +
+      " OR LOWER(j.location) LIKE '%pinellas%'" +
+      " OR LOWER(j.location) LIKE '%duval%'" +
+      " OR LOWER(j.location) LIKE '%lee county%'" +
+      " OR LOWER(j.location) LIKE '%brevard%'" +
+      " OR LOWER(j.location) LIKE '%volusia%'" +
+      " OR LOWER(j.location) LIKE '%pasco%'" +
+      " OR LOWER(j.location) LIKE '%seminole%'" +
+      " OR LOWER(j.location) LIKE '%sarasota%'" +
+      " OR LOWER(j.location) LIKE '%manatee%'" +
+      " OR LOWER(j.location) LIKE '%collier%'" +
+      " OR LOWER(j.location) LIKE '%escambia%'" +
+      " OR LOWER(j.location) LIKE '%osceola%'" +
+      " OR LOWER(j.location) LIKE '%st. johns%'" +
+      " OR LOWER(j.location) LIKE '%st. lucie%'" +
+      " OR LOWER(j.location) LIKE '%leon county%'" +
+      " OR LOWER(j.location) LIKE '%alachua%'" +
+      " OR LOWER(j.location) LIKE '%hernando%'" +
+      " OR LOWER(j.location) LIKE '%charlotte county%'" +
+      // Ambiguous counties — match on known FL cities instead
+      " OR LOWER(j.location) LIKE 'orlando,%'" +
+      " OR LOWER(j.location) LIKE 'maitland,%'" +
+      " OR LOWER(j.location) LIKE 'edgewood, orange%'" +
+      " OR LOWER(j.location) LIKE 'sand lake,%'" +
+      " OR LOWER(j.location) LIKE 'altamonte springs,%'" +
+      " OR LOWER(j.location) LIKE 'lake mary,%'" +
+      " OR LOWER(j.location) LIKE 'bonita springs,%'" +
+      " OR LOWER(j.location) LIKE 'naples,%'" +
+      " OR LOWER(j.location) LIKE 'boca raton,%'" +
+      " OR LOWER(j.location) LIKE 'delray beach,%'" +
+      " OR LOWER(j.location) LIKE 'west palm beach,%'" +
+      " OR LOWER(j.location) LIKE 'jupiter,%'" +
+      " OR LOWER(j.location) LIKE 'celebration,%'" +
+      " OR LOWER(j.location) LIKE 'cape canaveral,%'" +
+      " OR LOWER(j.location) LIKE 'cocoa,%'" +
+      " OR LOWER(j.location) LIKE 'melbourne, brevard%'" +
+      " OR LOWER(j.location) LIKE 'titusville,%'" +
+      " OR LOWER(j.location) LIKE 'merritt island,%'" +
+      " OR LOWER(j.location) LIKE 'gainesville, alachua%'" +
+      " OR LOWER(j.location) LIKE 'tallahassee,%'" +
+      " OR LOWER(j.location) LIKE 'pensacola,%'" +
+      " OR LOWER(j.location) LIKE 'fort lauderdale,%'" +
+      " OR LOWER(j.location) LIKE 'sunrise,%'" +
+      " OR LOWER(j.location) LIKE 'plantation,%'" +
+      " OR LOWER(j.location) LIKE 'deerfield beach,%'" +
+      " OR LOWER(j.location) LIKE 'oakland park,%')"
+    );
+  }
+
   // Feedback status
   if (feedbackStatus === "thumbs_up") {
     conditions.push("f.signal = 'thumbs_up'");
@@ -220,8 +289,9 @@ export function getJobList(filters: JobListFilters = {}): JobRow[] {
   // Only allow literal 'asc' or 'desc' — prevent injection
   const direction = sortDir === "asc" ? "ASC" : "DESC";
 
-  const whereClause =
-    conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
+  // Exclude prefiltered jobs (pass=0) and Pass 1 rejections (pass=1, overall=0)
+  conditions.unshift("sd0.job_id IS NULL");
+  conditions.unshift("sd1_fail.job_id IS NULL");
 
   const sql = `
     SELECT
@@ -235,13 +305,15 @@ export function getJobList(filters: JobListFilters = {}): JobRow[] {
       j.posted_at,
       sd.overall,
       sd.role_fit,
-      sd.skills_gap,
+      sd.skills_match,
       sd.culture_signals,
       sd.growth_potential,
       sd.comp_alignment,
       f.signal AS feedback_signal
     FROM jobs j
     LEFT JOIN score_dimensions sd ON sd.job_id = j.id AND sd.pass = 2
+    LEFT JOIN score_dimensions sd0 ON sd0.job_id = j.id AND sd0.pass = 0
+    LEFT JOIN score_dimensions sd1_fail ON sd1_fail.job_id = j.id AND sd1_fail.pass = 1 AND sd1_fail.overall = 0
     LEFT JOIN (
       SELECT job_id, signal
       FROM feedback
@@ -249,7 +321,7 @@ export function getJobList(filters: JobListFilters = {}): JobRow[] {
         SELECT MAX(id) FROM feedback GROUP BY job_id
       )
     ) f ON f.job_id = j.id
-    ${whereClause}
+    WHERE ${conditions.join(" AND ")}
     ORDER BY ${sortColumn} ${direction} NULLS LAST
   `;
 

@@ -124,7 +124,7 @@ function DimensionRow({ label, score, color, reasoning }: DimensionRowProps) {
 
 const DIMENSION_CONFIGS = [
   { key: "role_fit" as const, label: "Role Fit", color: "bg-blue-500" },
-  { key: "skills_gap" as const, label: "Skills Gap", color: "bg-green-500" },
+  { key: "skills_match" as const, label: "Skills Match", color: "bg-green-500" },
   {
     key: "culture_signals" as const,
     label: "Culture Signals",
@@ -232,7 +232,7 @@ export default async function JobDetailPage({
               <CardContent className="space-y-6">
                 <ScoreRadar
                   role_fit={score.role_fit}
-                  skills_gap={score.skills_gap}
+                  skills_match={score.skills_match}
                   culture_signals={score.culture_signals}
                   growth_potential={score.growth_potential}
                   comp_alignment={score.comp_alignment}

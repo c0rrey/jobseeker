@@ -23,6 +23,7 @@ import {
   type SortField,
   type SortDir,
   type FeedbackFilter,
+  type LocationFilter,
 } from "@/lib/queries";
 
 const VALID_SORT_FIELDS: SortField[] = ["overall", "salary", "posted_at"];
@@ -33,6 +34,7 @@ const VALID_FEEDBACK: FeedbackFilter[] = [
   "thumbs_down",
   "no_feedback",
 ];
+const VALID_LOCATIONS: LocationFilter[] = ["all", "remote", "florida"];
 
 function parseSortField(raw: string | undefined): SortField {
   if (raw && (VALID_SORT_FIELDS as string[]).includes(raw)) {
@@ -55,6 +57,13 @@ function parseFeedback(raw: string | undefined): FeedbackFilter {
   return "all";
 }
 
+function parseLocation(raw: string | undefined): LocationFilter {
+  if (raw && (VALID_LOCATIONS as string[]).includes(raw)) {
+    return raw as LocationFilter;
+  }
+  return "all";
+}
+
 export default async function JobsPage({
   searchParams,
 }: {
@@ -68,6 +77,7 @@ export default async function JobsPage({
   const companyRaw = Array.isArray(sp.company) ? sp.company[0] : sp.company;
   const sourceRaw = Array.isArray(sp.source) ? sp.source[0] : sp.source;
   const feedbackRaw = Array.isArray(sp.feedback) ? sp.feedback[0] : sp.feedback;
+  const locationRaw = Array.isArray(sp.location) ? sp.location[0] : sp.location;
   const sortRaw = Array.isArray(sp.sort) ? sp.sort[0] : sp.sort;
   const dirRaw = Array.isArray(sp.dir) ? sp.dir[0] : sp.dir;
 
@@ -76,12 +86,14 @@ export default async function JobsPage({
   const sortField = parseSortField(sortRaw);
   const sortDir = parseSortDir(dirRaw);
   const feedbackStatus = parseFeedback(feedbackRaw);
+  const locationStatus = parseLocation(locationRaw);
 
   const jobs = getJobList({
     scoreMin,
     scoreMax,
     company: companyRaw,
     source: sourceRaw,
+    location: locationStatus,
     feedbackStatus,
     sortField,
     sortDir,
@@ -106,6 +118,7 @@ export default async function JobsPage({
         scoreMax={scoreMaxRaw ?? ""}
         company={companyRaw ?? ""}
         source={sourceRaw ?? ""}
+        location={locationStatus}
         feedbackStatus={feedbackStatus}
       />
     </div>

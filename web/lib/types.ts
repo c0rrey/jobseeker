@@ -51,7 +51,7 @@ export interface ScoreDimension {
   job_id: number;
   pass: number; // 1 = fast filter, 2 = deep analysis
   role_fit: number | null; // 0-100
-  skills_gap: number | null; // 0-100
+  skills_match: number | null; // 0-100
   culture_signals: number | null; // 0-100
   growth_potential: number | null; // 0-100
   comp_alignment: number | null; // 0-100

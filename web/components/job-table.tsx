@@ -22,7 +22,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import type { JobRow, SortField, SortDir, FeedbackFilter } from "@/lib/queries";
+import type { JobRow, SortField, SortDir, FeedbackFilter, LocationFilter } from "@/lib/queries";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -36,10 +36,17 @@ interface JobTableProps {
   scoreMax: string;
   company: string;
   source: string;
+  location: LocationFilter;
   feedbackStatus: FeedbackFilter;
 }
 
 const SOURCES = ["adzuna", "remoteok", "linkedin", "career_page", "greenhouse", "lever", "ashby"] as const;
+
+const LOCATION_OPTIONS: { value: LocationFilter; label: string }[] = [
+  { value: "all", label: "All locations" },
+  { value: "remote", label: "Remote" },
+  { value: "florida", label: "Florida" },
+];
 
 const FEEDBACK_OPTIONS: { value: FeedbackFilter; label: string }[] = [
   { value: "all", label: "All feedback" },
@@ -86,6 +93,7 @@ export function JobTable({
   scoreMax,
   company,
   source,
+  location,
   feedbackStatus,
 }: JobTableProps) {
   const router = useRouter();
@@ -200,6 +208,24 @@ export function JobTable({
           </select>
         </div>
 
+        {/* Location dropdown */}
+        <div className="flex items-center gap-1.5">
+          <label className="text-xs text-muted-foreground whitespace-nowrap">
+            Location
+          </label>
+          <select
+            value={location}
+            className="rounded-md border border-input bg-background px-2 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-ring"
+            onChange={(e) => updateSearch({ location: e.target.value })}
+          >
+            {LOCATION_OPTIONS.map((o) => (
+              <option key={o.value} value={o.value}>
+                {o.label}
+              </option>
+            ))}
+          </select>
+        </div>
+
         {/* Feedback dropdown */}
         <div className="flex items-center gap-1.5">
           <label className="text-xs text-muted-foreground whitespace-nowrap">
@@ -281,7 +307,7 @@ export function JobTable({
                 <TableCell>
                   <DimensionBars
                     role_fit={job.role_fit}
-                    skills_gap={job.skills_gap}
+                    skills_match={job.skills_match}
                     culture_signals={job.culture_signals}
                     growth_potential={job.growth_potential}
                     comp_alignment={job.comp_alignment}
