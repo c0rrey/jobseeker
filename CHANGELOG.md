@@ -1,5 +1,36 @@
 # Changelog
 
+## 2026-03-20 — Session 20260320-220445 (Full-Description Enrichment, Company Discovery, Salary Templating)
+
+### Summary
+
+Session completed 9 tasks across three implementation waves and one review fix cycle. The main feature work added the full-description fetcher ported from v1.5, wired COALESCE fallback into the LLM scorer, introduced company auto-discovery from Pass 1 survivors, integrated it into the CLI, and made fast_filter salary thresholds configurable via template variables. Two review rounds ran: round 1 found 4 P2 issues (documentation drift, missing config variable, stale truncation lengths, None-verdict logic bug) and 15 P3 items; all 4 P2s were fixed in a same-session fix wave; round 2 returned a CLEAN PASS. 15 P3 issues were filed as seek-95 through seek-109 for the next session. 10 commits, 9 tasks closed.
+
+### Implementation (Waves 1–3 — Feature)
+
+- **seek-88**: feat(pipeline): port full-description fetcher from v1.5, add full_description column — new `full_description_fetcher.py`, `fetch_descriptions.py`, `scripts/__init__.py`; DB migration in `database.py`; `beautifulsoup4` added to `requirements.txt` (`47f141b`)
+- **seek-90**: feat: replace hardcoded salary thresholds in fast_filter.md with template variables — `fast_filter.md` lines 22 and 28 use `{{ salary_min }}` and `{{ salary_floor }}` (`d2e09a6`)
+- **seek-86**: feat: add company auto-discovery script for Pass 1 survivors — new `discover_companies.py` with SQL anti-join idempotency and `run_enrichment()` integration (`2f36a2d`)
+- **seek-89**: feat: prefer full_description in LLM scorer payload with length caps — `scorer.py` SQL queries updated with `COALESCE` + new `FAST_FILTER_DESC_CHARS`/`DEEP_SCORER_DESC_CHARS` constants (`ece3ddd`)
+- **seek-87**: feat(cli): add --discover flag wiring company auto-discovery into CLI — `cli.py` gains `run_discover()`, `_print_discover_summary()`, `--discover` flag; `--all` explicitly excludes it (`01767b6`)
+- **seek-86/87/88** (docs): docs: update README with new pipeline stages and scripts — `README.md` and `Makefile` updated (`3c11892`)
+
+### Review Fixes (Round 1 — P2s)
+
+- **seek-91**: fix(cli): correct --all stage order documentation to fetch→prefilter→enrich — `cli.py` docstring, argparse help, `Makefile`, `test_cli.py` (`cac1e12`)
+- **seek-92**: fix(config): add salary_floor to profile.yaml — `profile.yaml` gains `salary_floor: 120000` (`4f1ab0f`)
+- **seek-93**: fix(prompts): update truncation lengths to match scorer.py constants — `fast_filter.md` → "4000 characters", `deep_scorer.md` → "8000 characters" (`c186a56`)
+- **seek-94**: fix(scorer): use allowlist for verdict so None/unknown default to reject — `scorer.py` verdict check changed to `overall = confidence if verdict == "yes" else 0` (`b2e4830`)
+
+### Review Statistics
+
+| Round | Scope | P1 | P2 | P3 | Verdict |
+|-------|-------|----|----|----|---------|
+| 1 | 5 tasks, 13 files | 0 | 4 | 15 | PASS WITH ISSUES |
+| 2 | 4 fix tasks, 7 files | 0 | 0 | 0 | CLEAN PASS |
+
+19 root causes consolidated from 22 raw findings. All 4 P2s auto-fixed same session; 15 P3s filed as seek-95 through seek-109.
+
 ## 2026-03-20 — Session 20260320-181429 (CLI Entry Point, Code Quality Fixes, Dual Fix Cycle)
 
 ### Summary
