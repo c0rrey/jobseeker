@@ -115,7 +115,6 @@ def run(db_path: str, rate_limit: float = 1.0, limit: int | None = None) -> int:
     total = len(jobs)
     successful = 0
     failed = 0
-    skipped = 0  # reserved for future use (already non-NULL rows are excluded by query)
 
     logger.info(
         "fetch_descriptions: total=%d to fetch, rate_limit=%.1fs",
@@ -151,11 +150,10 @@ def run(db_path: str, rate_limit: float = 1.0, limit: int | None = None) -> int:
             logger.warning("  No description retrieved for job id=%d", db_id)
 
     logger.info(
-        "fetch_descriptions complete: total=%d successful=%d failed=%d skipped=%d",
+        "fetch_descriptions complete: total=%d successful=%d failed=%d",
         total,
         successful,
         failed,
-        skipped,
     )
 
     conn.close()
