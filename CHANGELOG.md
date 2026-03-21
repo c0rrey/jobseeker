@@ -1,5 +1,52 @@
 # Changelog
 
+## 2026-03-20 — Session 20260320-181429 (CLI Entry Point, Code Quality Fixes, Dual Fix Cycle)
+
+### Summary
+
+Session completed 18 tasks across one feature wave and two fix cycles. Wave 1 delivered the pipeline CLI entry point (seek-24: `--fetch`, `--enrich`, `--prefilter`, `--all` with 37 tests) and 10 code quality fixes across fetchers, filter, scorer, and enrichment modules. Two review rounds ran: round 1 found a P1 data-loss bug (seek-70 partial `skills_gap→skills_match` rename left the DB INSERT broken) plus 4 P2s — all 5 fixed. Round 2 found a P1 ImportError in `test_cli.py` after the seek-77 rename plus a P2 mock semantics break — both fixed. 16 commits, 18 tasks closed.
+
+### Implementation (Wave 1 — Feature + Code Quality)
+
+- **seek-24**: feat: CLI entry point with `--fetch`/`--enrich`/`--prefilter`/`--all` stage flags; 37 tests (`8dda4be`)
+- **seek-63/68**: fix: validate RemoteOK API response type and align `User-Agent` header (`0f467c5`)
+- **seek-64**: fix: preserve exception chain in Adzuna error handler (`c37f79e`)
+- **seek-65**: docs: rewrite `filter.py` module docstring (`04a55e1`)
+- **seek-66**: refactor: rename `should_filter` → `has_red_flags` (`16b736d`)
+- **seek-67**: refactor: convert f-string logger calls to lazy `%s`/`%d` formatting in fetchers (`cfcf125`)
+- **seek-69**: fix: move `urlparse` import to module top level (`9f8b901`)
+- **seek-70**: fix: rename `skills_gap` → `skills_match` in scorer and prompt (`c786d0c`)
+- **seek-71**: fix: grammatically correct company count pluralization (`cf23498`)
+- **seek-72**: fix: guard non-dict JSON in levelsfy Crunchbase merge (`9101171`)
+
+### Review Fixes (Round 1 — P2/P1 Remediation)
+
+- **seek-73**: fix: complete `skills_gap→skills_match` rename across DB schema, models, profile evolution, tests, design doc — 10+ files (`68ae146`, `488b9c1`)
+- **seek-74**: fix: catch `ValueError` (JSONDecodeError) alongside `RequestException` in levelsfy and remoteok (`69e98e5`)
+- **seek-75**: fix: move `init_db` inside CLI error boundary
+- **seek-76**: refactor: rename `all_raw_jobs` → `all_job_pairs` (`894e23c`)
+- **seek-77**: refactor: rename `run_prefilter_stage` → `run_prefilter` (`4305aa6`)
+
+### Review Fixes (Round 2 — Seek-77 Propagation)
+
+- **seek-78/79**: fix: update `test_cli.py` import and `_PATCH_RUN_PREFILTER` mock target after seek-77 rename (`82ddb36`)
+
+### Review Statistics
+
+| Round | Scope | P1 | P2 | P3 | Verdict |
+|-------|-------|----|----|-----|---------|
+| 1 | 11 tasks, Wave 1 | 1 | 4 | 12 | FIX — 5 crumbs filed (seek-73–77) |
+| 2 | 5 fix commits | 1 | 1 | 1 | FIX — 2 crumbs filed (seek-78–79), 1 P3 auto-filed (seek-80) |
+
+26 raw findings → 17 root causes in round 1. 4 raw findings → 3 root causes in round 2. All P1/P2 fixed in-session.
+
+### Open Issues
+
+- **seek-25** (P1): Makefile + requirements files — unblocked now that seek-24 is closed
+- **seek-80** (P3): `profile_evolution.md:35` description reads "skills gap score" instead of "skills match score"
+
+---
+
 ## 2026-03-20 — Session 20260320-160447 (Enrichment Orchestrator, Deep Scorer, Pipeline Fix Cycle)
 
 ### Summary
