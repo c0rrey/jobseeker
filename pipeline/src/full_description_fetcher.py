@@ -177,6 +177,10 @@ class FullDescriptionFetcher:
             Full description text (at least 100 characters), or ``None`` if
             the fetch failed or yielded insufficient content.
         """
+        if not url:
+            logger.warning("Skipping fetch: url is None or empty")
+            return None
+
         try:
             self._rate_limit_wait()
 
