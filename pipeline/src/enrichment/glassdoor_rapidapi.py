@@ -385,8 +385,25 @@ def _parse_company_data(data: dict[str, Any]) -> dict[str, Any]:
         "company_link": _safe_str(data.get("company_link")),
     }
 
+    # First-class columns the deep scorer reads directly.
+    size_raw = _safe_str(data.get("company_size"))
+    industry_raw = _safe_str(data.get("industry"))
+    website_raw = _safe_str(data.get("website"))
+    glassdoor_url = _safe_str(data.get("company_link"))
+    hq_location = _safe_str(data.get("headquarters_location"))
+
+    # Store extras in the blob too for traceability.
+    glassdoor_blob["company_size_category"] = _safe_str(
+        data.get("company_size_category")
+    )
+    glassdoor_blob["headquarters_location"] = hq_location
+
     return {
         "glassdoor_rating": overall,
+        "glassdoor_url": glassdoor_url,
+        "size_range": size_raw,
+        "industry": industry_raw,
+        "website": website_raw,
         "glassdoor_blob": glassdoor_blob,
     }
 
@@ -399,21 +416,22 @@ def _parse_company_data(data: dict[str, Any]) -> dict[str, Any]:
 def _update_company(
     conn: sqlite3.Connection,
     company_id: int,
-    glassdoor_rating: float | None,
-    glassdoor_blob: dict[str, Any],
+    parsed: dict[str, Any],
 ) -> None:
     """Merge Glassdoor enrichment data into the companies row.
 
     Reads the existing ``crunchbase_data`` blob, merges the ``'glassdoor'``
     key, then writes back.  Existing keys (e.g. ``'levelsfy'``) are
-    preserved.
+    preserved.  Also writes ``size_range``, ``industry``, ``glassdoor_url``,
+    and ``domain`` when the API provides them.
 
     Args:
         conn: Open SQLite connection to the V2 pipeline database.
         company_id: Primary key used to locate the row.
-        glassdoor_rating: Overall Glassdoor rating (may be None).
-        glassdoor_blob: Dict to store under ``crunchbase_data['glassdoor']``.
+        parsed: The dict returned by ``_parse_company_data``.
     """
+    glassdoor_blob = parsed["glassdoor_blob"]
+
     existing_row = conn.execute(
         "SELECT crunchbase_data FROM companies WHERE id = ?", (company_id,)
     ).fetchone()
@@ -421,21 +439,43 @@ def _update_company(
     existing_data: dict[str, Any] = {}
     if existing_row and existing_row[0]:
         try:
-            parsed = json.loads(existing_row[0])
-            existing_data = parsed if isinstance(parsed, dict) else {}
+            existing = json.loads(existing_row[0])
+            existing_data = existing if isinstance(existing, dict) else {}
         except (json.JSONDecodeError, TypeError):
             existing_data = {}
 
     merged = {**existing_data, "glassdoor": glassdoor_blob}
 
+    # Derive domain from website URL for the companies.domain column.
+    website = parsed.get("website")
+    domain = None
+    if website:
+        from urllib.parse import urlparse
+
+        netloc = urlparse(website).netloc
+        if netloc:
+            domain = netloc.removeprefix("www.")
+
     conn.execute(
         """
         UPDATE companies
         SET    glassdoor_rating = ?,
-               crunchbase_data  = ?
+               glassdoor_url    = ?,
+               crunchbase_data  = ?,
+               size_range       = COALESCE(?, size_range),
+               industry         = COALESCE(?, industry),
+               domain           = COALESCE(?, domain)
         WHERE  id = ?
         """,  # noqa: S608
-        (glassdoor_rating, json.dumps(merged), company_id),
+        (
+            parsed.get("glassdoor_rating"),
+            parsed.get("glassdoor_url"),
+            json.dumps(merged),
+            parsed.get("size_range"),
+            parsed.get("industry"),
+            domain,
+            company_id,
+        ),
     )
     conn.commit()
 
@@ -493,8 +533,7 @@ def enrich(
     try:
         parsed = _parse_company_data(data)
         glassdoor_rating: float | None = parsed["glassdoor_rating"]
-        glassdoor_blob: dict[str, Any] = parsed["glassdoor_blob"]
-        review_count = glassdoor_blob.get("review_count") or 0
+        review_count = parsed["glassdoor_blob"].get("review_count") or 0
 
         # Reject zero-rating / zero-review responses (e.g. Good Inside).
         if (glassdoor_rating is None or glassdoor_rating == 0) and review_count == 0:
@@ -507,7 +546,7 @@ def enrich(
             )
             return False
 
-        _update_company(db_connection, company_id, glassdoor_rating, glassdoor_blob)
+        _update_company(db_connection, company_id, parsed)
     except Exception as exc:  # noqa: BLE001
         logger.warning(
             "Glassdoor RapidAPI enrichment failed for '%s': %s", company_name, exc
