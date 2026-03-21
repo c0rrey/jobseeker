@@ -15,6 +15,8 @@ Tests verify:
 - Mutually exclusive flag group prevents combining --fetch and --enrich
 - Stage exception is caught and returns exit code 1
 - --db flag overrides the default database path
+- detect_duplicates is called during --fetch after deduplicate_and_insert
+- run_fetch summary dict includes dedup fields (dup_groups, dup_jobs, dup_representatives)
 """
 
 from __future__ import annotations
@@ -36,6 +38,7 @@ from pipeline.cli import (
     run_fetch,
     run_prefilter,
 )
+from pipeline.src.duplicate_detector import DetectionSummary
 
 # ---------------------------------------------------------------------------
 # Patch targets
@@ -52,6 +55,7 @@ _PATCH_ATS = "pipeline.cli.ATSFetcher"
 _PATCH_CAREER = "pipeline.cli.CareerPageFetcher"
 
 _PATCH_DEDUP = "pipeline.cli.deduplicate_and_insert"
+_PATCH_DETECT_DUPLICATES = "pipeline.cli.detect_duplicates"
 _PATCH_RUN_ENRICHMENT = "pipeline.cli.run_enrichment"
 _PATCH_RUN_PREFILTER = "pipeline.cli._filter_run_prefilter"
 
@@ -737,3 +741,128 @@ class TestSummaryPrinters:
         out = capsys.readouterr().out
         assert "Enrich complete" in out
         assert "0 companies" in out
+
+
+# ---------------------------------------------------------------------------
+# detect_duplicates integration within --fetch
+# ---------------------------------------------------------------------------
+
+
+class TestFetchStageDetectDuplicates:
+    """Verify detect_duplicates() is called during --fetch and its results are surfaced."""
+
+    def test_detect_duplicates_called_after_dedup_insert(
+        self, fake_db_path: str, mock_conn: MagicMock
+    ) -> None:
+        """detect_duplicates must be invoked once during --fetch."""
+        dup_summary = DetectionSummary(
+            groups_created=2, jobs_grouped=6, representatives_set=2
+        )
+        with (
+            patch(_PATCH_INIT_DB),
+            patch(_PATCH_GET_CONNECTION, return_value=mock_conn),
+            patch(_PATCH_GET_DB_PATH, return_value=fake_db_path),
+            patch(_PATCH_ADZUNA) as mock_adzuna_cls,
+            patch(_PATCH_REMOTEOK) as mock_remoteok_cls,
+            patch(_PATCH_LINKEDIN) as mock_linkedin_cls,
+            patch(_PATCH_ATS) as mock_ats_cls,
+            patch(_PATCH_CAREER) as mock_career_cls,
+            patch(_PATCH_DEDUP, return_value=(4, 0)),
+            patch(_PATCH_DETECT_DUPLICATES, return_value=dup_summary) as mock_detect,
+        ):
+            _configure_fetcher_mocks(
+                mock_adzuna_cls, mock_remoteok_cls, mock_linkedin_cls,
+                mock_ats_cls, mock_career_cls,
+            )
+            result = main(["--fetch"])
+
+        mock_detect.assert_called_once()
+        assert result == 0
+
+    def test_fetch_summary_includes_dup_fields(
+        self, fake_db_path: str, mock_conn: MagicMock
+    ) -> None:
+        """run_fetch summary dict must expose dup_groups, dup_jobs, dup_representatives."""
+        dup_summary = DetectionSummary(
+            groups_created=3, jobs_grouped=9, representatives_set=3
+        )
+        with (
+            patch(_PATCH_INIT_DB),
+            patch(_PATCH_GET_CONNECTION, return_value=mock_conn),
+            patch(_PATCH_GET_DB_PATH, return_value=fake_db_path),
+            patch(_PATCH_ADZUNA) as mock_adzuna_cls,
+            patch(_PATCH_REMOTEOK) as mock_remoteok_cls,
+            patch(_PATCH_LINKEDIN) as mock_linkedin_cls,
+            patch(_PATCH_ATS) as mock_ats_cls,
+            patch(_PATCH_CAREER) as mock_career_cls,
+            patch(_PATCH_DEDUP, return_value=(9, 0)),
+            patch(_PATCH_DETECT_DUPLICATES, return_value=dup_summary),
+        ):
+            _configure_fetcher_mocks(
+                mock_adzuna_cls, mock_remoteok_cls, mock_linkedin_cls,
+                mock_ats_cls, mock_career_cls,
+            )
+            summary = run_fetch(fake_db_path)
+
+        assert summary["dup_groups"] == 3
+        assert summary["dup_jobs"] == 9
+        assert summary["dup_representatives"] == 3
+
+    def test_detect_duplicates_called_with_open_connection(
+        self, fake_db_path: str, mock_conn: MagicMock
+    ) -> None:
+        """detect_duplicates must receive the same connection used for dedup_and_insert."""
+        dup_summary = DetectionSummary(
+            groups_created=0, jobs_grouped=0, representatives_set=0
+        )
+        with (
+            patch(_PATCH_INIT_DB),
+            patch(_PATCH_GET_CONNECTION, return_value=mock_conn),
+            patch(_PATCH_GET_DB_PATH, return_value=fake_db_path),
+            patch(_PATCH_ADZUNA) as mock_adzuna_cls,
+            patch(_PATCH_REMOTEOK) as mock_remoteok_cls,
+            patch(_PATCH_LINKEDIN) as mock_linkedin_cls,
+            patch(_PATCH_ATS) as mock_ats_cls,
+            patch(_PATCH_CAREER) as mock_career_cls,
+            patch(_PATCH_DEDUP, return_value=(0, 0)),
+            patch(_PATCH_DETECT_DUPLICATES, return_value=dup_summary) as mock_detect,
+        ):
+            _configure_fetcher_mocks(
+                mock_adzuna_cls, mock_remoteok_cls, mock_linkedin_cls,
+                mock_ats_cls, mock_career_cls,
+            )
+            run_fetch(fake_db_path)
+
+        # detect_duplicates should have been called with the mock connection.
+        call_args = mock_detect.call_args
+        assert call_args is not None
+        assert call_args[0][0] is mock_conn
+
+    def test_fetch_zero_dup_groups_still_returns_valid_summary(
+        self, fake_db_path: str, mock_conn: MagicMock
+    ) -> None:
+        """A run with no duplicate groups must produce zeros for dup fields."""
+        dup_summary = DetectionSummary(
+            groups_created=0, jobs_grouped=0, representatives_set=0
+        )
+        with (
+            patch(_PATCH_INIT_DB),
+            patch(_PATCH_GET_CONNECTION, return_value=mock_conn),
+            patch(_PATCH_GET_DB_PATH, return_value=fake_db_path),
+            patch(_PATCH_ADZUNA) as mock_adzuna_cls,
+            patch(_PATCH_REMOTEOK) as mock_remoteok_cls,
+            patch(_PATCH_LINKEDIN) as mock_linkedin_cls,
+            patch(_PATCH_ATS) as mock_ats_cls,
+            patch(_PATCH_CAREER) as mock_career_cls,
+            patch(_PATCH_DEDUP, return_value=(2, 0)),
+            patch(_PATCH_DETECT_DUPLICATES, return_value=dup_summary),
+        ):
+            _configure_fetcher_mocks(
+                mock_adzuna_cls, mock_remoteok_cls, mock_linkedin_cls,
+                mock_ats_cls, mock_career_cls,
+            )
+            summary = run_fetch(fake_db_path)
+
+        assert summary["dup_groups"] == 0
+        assert summary["dup_jobs"] == 0
+        assert summary["dup_representatives"] == 0

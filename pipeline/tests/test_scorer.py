@@ -9,6 +9,9 @@ Covers:
 - write_pass1_results: upsert behavior, overall mapping (yes/no), profile_hash
   persistence, empty input no-op, return value.
 - compute_profile_hash: determinism, sensitivity to input changes.
+- Duplicate-aware query filtering: get_unscored_jobs, get_stale_scored_jobs,
+  and get_pass1_survivors must return at most one job per duplicate group
+  (the representative); non-representatives are excluded.
 
 All tests use an in-memory SQLite connection initialised via init_db() from
 pipeline.src.database.  No LLM calls are made.
@@ -23,10 +26,13 @@ from typing import Any
 import pytest
 
 from pipeline.src.database import get_connection, init_db
+from pipeline.src.duplicate_detector import detect_duplicates
 from pipeline.src.scorer import (
     BATCH_SIZE,
     PASS_1,
+    PASS_2,
     compute_profile_hash,
+    get_pass1_survivors,
     get_stale_scored_jobs,
     get_unscored_jobs,
     split_into_batches,
@@ -441,3 +447,205 @@ class TestWritePass1Results:
         assert by_id[job_ids[0]] == 90
         assert by_id[job_ids[1]] == 0
         assert by_id[job_ids[2]] == 55
+
+
+# ---------------------------------------------------------------------------
+# Duplicate-aware query filtering helpers
+# ---------------------------------------------------------------------------
+
+# A sufficiently long description so that duplicate detection qualifies these jobs.
+_DEDUP_DESC = (
+    "Senior Data Engineer position. Build reliable data pipelines with Python "
+    "and dbt. Work with Spark, Snowflake, and BigQuery. Strong SQL required. "
+    "5+ years experience. Remote-friendly team with great benefits."
+)
+
+
+def _make_duplicate_group(
+    conn: sqlite3.Connection,
+    company: str = "DupFilterCo",
+    n_members: int = 3,
+    url_prefix: str = "dup",
+) -> tuple[int, list[int]]:
+    """Insert n_members jobs with identical descriptions for the same company,
+    call detect_duplicates(), and return (representative_id, [non_rep_ids]).
+
+    The lowest-id job becomes the representative.
+    """
+    ids: list[int] = []
+    static = getattr(_make_duplicate_group, "_counter", 0)
+    for i in range(n_members):
+        static += 1
+        url = f"https://example.com/{url_prefix}/{static}"
+        conn.execute(
+            """
+            INSERT INTO jobs (source, source_type, url, title, company, description)
+            VALUES ('test', 'api', ?, 'Data Engineer', ?, ?)
+            """,
+            (url, company, _DEDUP_DESC),
+        )
+        conn.commit()
+        ids.append(conn.execute("SELECT last_insert_rowid()").fetchone()[0])
+    _make_duplicate_group._counter = static  # type: ignore[attr-defined]
+
+    detect_duplicates(conn)
+
+    representative_id = min(ids)
+    non_rep_ids = [jid for jid in ids if jid != representative_id]
+    return representative_id, non_rep_ids
+
+
+# ---------------------------------------------------------------------------
+# get_unscored_jobs — duplicate-aware filtering
+# ---------------------------------------------------------------------------
+
+
+class TestGetUnscoredJobsDuplicateAware:
+    """get_unscored_jobs must return at most one job per duplicate group."""
+
+    def test_returns_only_representative_for_group(
+        self, db_conn: sqlite3.Connection
+    ) -> None:
+        rep_id, non_rep_ids = _make_duplicate_group(
+            db_conn, company="UnscoredDupCo", url_prefix="usd"
+        )
+        result = get_unscored_jobs(db_conn)
+        returned_ids = {r["id"] for r in result}
+
+        assert rep_id in returned_ids
+        for nrid in non_rep_ids:
+            assert nrid not in returned_ids
+
+    def test_at_most_one_per_group(self, db_conn: sqlite3.Connection) -> None:
+        _make_duplicate_group(db_conn, company="OncePerGroup", url_prefix="opg")
+        result = get_unscored_jobs(db_conn)
+        assert len(result) <= 1
+
+    def test_ungrouped_job_always_returned(self, db_conn: sqlite3.Connection) -> None:
+        """A job with dup_group_id IS NULL (no group) must always be included."""
+        ungrouped_id = _insert_job(
+            db_conn, url="https://example.com/ungrouped1", company="SoloFirm"
+        )
+        result = get_unscored_jobs(db_conn)
+        returned_ids = {r["id"] for r in result}
+        assert ungrouped_id in returned_ids
+
+    def test_both_ungrouped_and_representative_returned(
+        self, db_conn: sqlite3.Connection
+    ) -> None:
+        ungrouped_id = _insert_job(
+            db_conn, url="https://example.com/ungrouped2", company="IndieInc"
+        )
+        rep_id, _ = _make_duplicate_group(
+            db_conn, company="MixedCo", url_prefix="mix"
+        )
+        result = get_unscored_jobs(db_conn)
+        returned_ids = {r["id"] for r in result}
+
+        assert ungrouped_id in returned_ids
+        assert rep_id in returned_ids
+
+
+# ---------------------------------------------------------------------------
+# get_stale_scored_jobs — duplicate-aware filtering
+# ---------------------------------------------------------------------------
+
+
+class TestGetStaleScoredJobsDuplicateAware:
+    """get_stale_scored_jobs must return at most one job per duplicate group."""
+
+    def test_excludes_non_representative_stale_rows(
+        self, db_conn: sqlite3.Connection
+    ) -> None:
+        rep_id, non_rep_ids = _make_duplicate_group(
+            db_conn, company="StaleDupCo", url_prefix="stale"
+        )
+        # Score both representative and one non-representative with an old hash.
+        old_hash = "oldhash_dedup"
+        _insert_score(db_conn, rep_id, pass_num=1, profile_hash=old_hash)
+        _insert_score(db_conn, non_rep_ids[0], pass_num=1, profile_hash=old_hash)
+
+        result = get_stale_scored_jobs(db_conn, "newhash_dedup")
+        returned_ids = {r["id"] for r in result}
+
+        assert rep_id in returned_ids
+        assert non_rep_ids[0] not in returned_ids
+
+    def test_ungrouped_stale_job_returned(self, db_conn: sqlite3.Connection) -> None:
+        ungrouped_id = _insert_job(
+            db_conn, url="https://example.com/stale_ungrouped", company="StaleAlone"
+        )
+        _insert_score(db_conn, ungrouped_id, pass_num=1, profile_hash="oldone")
+
+        result = get_stale_scored_jobs(db_conn, "newone")
+        returned_ids = {r["id"] for r in result}
+        assert ungrouped_id in returned_ids
+
+
+# ---------------------------------------------------------------------------
+# get_pass1_survivors — duplicate-aware filtering
+# ---------------------------------------------------------------------------
+
+
+class TestGetPass1SurvivorsDuplicateAware:
+    """get_pass1_survivors must return at most one job per duplicate group."""
+
+    def test_returns_only_representative_from_group(
+        self, db_conn: sqlite3.Connection
+    ) -> None:
+        rep_id, non_rep_ids = _make_duplicate_group(
+            db_conn, company="SurvivorCo", url_prefix="surv"
+        )
+        # Score representative with Pass 1 overall > 0 (YES verdict).
+        _insert_score(db_conn, rep_id, pass_num=PASS_1, overall=75)
+        # Also score non-representative with Pass 1 to simulate propagated score.
+        _insert_score(db_conn, non_rep_ids[0], pass_num=PASS_1, overall=75)
+
+        result = get_pass1_survivors(db_conn, "currenthash")
+        returned_ids = {r["id"] for r in result}
+
+        assert rep_id in returned_ids
+        for nrid in non_rep_ids:
+            assert nrid not in returned_ids
+
+    def test_ungrouped_pass1_survivor_returned(
+        self, db_conn: sqlite3.Connection
+    ) -> None:
+        ungrouped_id = _insert_job(
+            db_conn, url="https://example.com/surv_ungrouped", company="SurvAlone"
+        )
+        _insert_score(db_conn, ungrouped_id, pass_num=PASS_1, overall=80)
+
+        result = get_pass1_survivors(db_conn, "anyhash")
+        returned_ids = {r["id"] for r in result}
+        assert ungrouped_id in returned_ids
+
+    def test_rejected_representative_not_returned(
+        self, db_conn: sqlite3.Connection
+    ) -> None:
+        """A representative with overall = 0 (rejected) must not appear in survivors."""
+        rep_id, _ = _make_duplicate_group(
+            db_conn, company="RejectedGroup", url_prefix="rej"
+        )
+        _insert_score(db_conn, rep_id, pass_num=PASS_1, overall=0)
+
+        result = get_pass1_survivors(db_conn, "hash")
+        returned_ids = {r["id"] for r in result}
+        assert rep_id not in returned_ids
+
+    def test_result_has_extended_keys_for_pass2(
+        self, db_conn: sqlite3.Connection
+    ) -> None:
+        """Pass 2 survivors query must expose salary and company_id fields."""
+        ungrouped_id = _insert_job(
+            db_conn, url="https://example.com/keys_check", company="KeysCo"
+        )
+        _insert_score(db_conn, ungrouped_id, pass_num=PASS_1, overall=70)
+
+        result = get_pass1_survivors(db_conn, "")
+        assert len(result) == 1
+        expected_keys = {
+            "id", "title", "company", "location", "description",
+            "salary_min", "salary_max", "salary_currency", "company_id",
+        }
+        assert expected_keys.issubset(set(result[0].keys()))
