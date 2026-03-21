@@ -289,9 +289,17 @@ def get_connection(db_path: str | Path) -> sqlite3.Connection:
         and foreign_keys = ON.
 
     Raises:
+        FileNotFoundError: If *db_path* does not exist.  Prevents sqlite3
+            from silently creating an empty database at a mistyped path.
         sqlite3.Error: If the connection cannot be established.
     """
-    conn = sqlite3.connect(str(db_path))
+    path = Path(db_path)
+    if not path.exists():
+        raise FileNotFoundError(
+            f"Database file not found: {path!r}. "
+            "Run init_db() first or check the path."
+        )
+    conn = sqlite3.connect(str(path))
     conn.row_factory = sqlite3.Row
     _apply_connection_settings(conn)
     return conn
