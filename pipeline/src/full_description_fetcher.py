@@ -33,8 +33,15 @@ class FullDescriptionFetcher:
 
         Args:
             rate_limit_seconds: Minimum seconds between outbound requests.
-                Defaults to 1.0.
+                Defaults to 1.0.  Must be non-negative.
+
+        Raises:
+            ValueError: If *rate_limit_seconds* is negative.
         """
+        if rate_limit_seconds < 0:
+            raise ValueError(
+                f"rate_limit_seconds must be >= 0, got {rate_limit_seconds}"
+            )
         self.rate_limit: float = rate_limit_seconds
         self.last_request_time: float = 0.0
         self.session: requests.Session = requests.Session()

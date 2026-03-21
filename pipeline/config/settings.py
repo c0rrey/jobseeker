@@ -71,7 +71,10 @@ def get_rapidapi_key() -> str:
     """
     Get the RapidAPI key from environment variables.
 
-    Used for LinkedIn job search via RapidAPI.
+    Used by all RapidAPI-backed features: LinkedIn job search
+    (``fetchers.linkedin``), Glassdoor enrichment
+    (``enrichment.glassdoor_rapidapi``), and company discovery
+    (``company_discovery``).
 
     Returns:
         The RAPIDAPI_KEY value.

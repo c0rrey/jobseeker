@@ -70,7 +70,13 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 BATCH_SIZE: int = 40
-PASS_REJECTED: int = 0  # sentinel: job was filtered out / not scored
+# Sentinel value stored in the ``pass`` column of ``score_dimensions`` to mark
+# a job as explicitly rejected (not scored).  Natural pass values are 1 and 2;
+# 0 is reserved as a rejection sentinel so that queries like
+# ``WHERE sd.pass = 0`` identify rejected jobs without requiring a separate
+# boolean column.  See also: ``get_unscored_jobs`` which uses
+# ``NOT EXISTS (... pass = PASS_REJECTED)`` to exclude previously rejected jobs.
+PASS_REJECTED: int = 0
 PASS_1: int = 1
 PASS_2: int = 2
 
@@ -87,10 +93,14 @@ DEEP_SCORER_DESC_CHARS: int = 8000
 
 
 def _safe_int(value: Any, default: int = 0) -> int:
-    """Convert *value* to int, returning *default* on TypeError or ValueError."""
+    """Convert *value* to int, returning *default* on TypeError/ValueError/OverflowError.
+
+    Handles degenerate inputs such as ``float('inf')`` and ``float('nan')``,
+    which raise ``OverflowError`` when passed to ``int()``.
+    """
     try:
         return int(value)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         return default
 
 
@@ -274,6 +284,11 @@ def split_into_batches(
         size = math.ceil(len(jobs) / n_batches)
         return [jobs[i : i + size] for i in range(0, len(jobs), size)]
 
+    if batch_size <= 0:
+        raise ValueError(
+            f"batch_size must be a positive integer, got {batch_size}"
+        )
+
     return [jobs[i : i + batch_size] for i in range(0, len(jobs), batch_size)]
 
 
@@ -424,9 +439,15 @@ def upsert_pass1_results_from_files(
         - ``verdict == "yes"`` → ``overall = confidence``
         - ``verdict != "yes"`` → ``overall = 0``
 
+    .. note::
+        After upserting all result files, this function calls
+        :func:`~pipeline.src.duplicate_detector.propagate_scores` which commits
+        its own transaction internally (``with conn:``).  The caller should
+        still commit any remaining uncommitted rows from the INSERT OR REPLACE
+        statements, but propagated rows will already be committed.
+
     Args:
-        db_connection: Open SQLite connection.  The caller is responsible for
-            committing after this function returns.
+        db_connection: Open SQLite connection.
         results_dir: Directory containing ``*.json`` result files written by
             :func:`write_pass1_results`.  Missing or empty directories return 0.
 
@@ -627,9 +648,15 @@ def upsert_pass2_results_from_files(
     canonical weighting (role_fit 30%, skills_match 25%, culture_signals 15%,
     growth_potential 15%, comp_alignment 15%).
 
+    .. note::
+        After upserting all result files, this function calls
+        :func:`~pipeline.src.duplicate_detector.propagate_scores` which commits
+        its own transaction internally (``with conn:``).  The caller should
+        still commit any remaining uncommitted rows from the INSERT OR REPLACE
+        statements, but propagated rows will already be committed.
+
     Args:
-        db_connection: Open SQLite connection.  The caller is responsible for
-            committing after this function returns.
+        db_connection: Open SQLite connection.
         results_dir: Directory containing ``*.json`` result files written by
             :func:`write_pass2_results`.  Missing or empty directories return 0.
 

@@ -47,6 +47,7 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 _SIMILARITY_THRESHOLD: float = 0.70
+_TITLE_SIMILARITY_THRESHOLD: float = 0.50
 
 # Descriptions shorter than this are excluded from grouping to avoid
 # false-positive matches on stub / placeholder text.
@@ -63,6 +64,7 @@ class _Job:
 
     id: int
     company_key: str  # normalised: lower().strip()
+    title: str  # normalised: lower().strip()
     description: str
 
 
@@ -87,9 +89,10 @@ class DetectionSummary:
 
 
 class _UnionFind:
-    """Union-Find data structure for grouping job IDs.
+    """Union-Find data structure for grouping integer job IDs.
 
-    Supports arbitrary hashable elements as node IDs.
+    Node IDs must be ``int`` values (job primary keys).  The internal
+    parent and rank dictionaries are typed ``dict[int, int]``.
     """
 
     def __init__(self) -> None:
@@ -160,7 +163,7 @@ def _fetch_qualifying_jobs(conn: sqlite3.Connection) -> list[_Job]:
         A list of _Job objects ordered by id ASC.
     """
     query = """
-        SELECT id, company, description
+        SELECT id, company, title, description
         FROM jobs
         WHERE description IS NOT NULL
           AND length(description) >= :min_len
@@ -171,7 +174,8 @@ def _fetch_qualifying_jobs(conn: sqlite3.Connection) -> list[_Job]:
         _Job(
             id=row[0],
             company_key=row[1].strip().lower(),
-            description=row[2],
+            title=(row[2] or "").strip().lower(),
+            description=row[3],
         )
         for row in rows
     ]

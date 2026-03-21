@@ -54,6 +54,9 @@ def _get_pass1_survivors_without_description(
     Returns:
         List of dicts with keys: ``id``, ``url``, ``source``.
     """
+    if limit is not None and limit == 0:
+        return []
+
     sql = """
         SELECT
             j.id,
