@@ -280,7 +280,11 @@ def split_into_batches(
     if not jobs:
         return []
 
-    if n_batches is not None and n_batches > 0:
+    if n_batches is not None:
+        if n_batches <= 0:
+            raise ValueError(
+                f"n_batches must be a positive integer; got {n_batches}"
+            )
         size = math.ceil(len(jobs) / n_batches)
         return [jobs[i : i + size] for i in range(0, len(jobs), size)]
 

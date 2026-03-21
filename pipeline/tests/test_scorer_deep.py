@@ -351,6 +351,16 @@ class TestSplitIntoBatchesNBatches:
 
         assert max(sizes) <= math.ceil(len(jobs) / 3)
 
+    def test_n_batches_zero_raises_value_error(self) -> None:
+        jobs = _make_jobs(5)
+        with pytest.raises(ValueError, match="n_batches must be a positive integer"):
+            split_into_batches(jobs, n_batches=0)
+
+    def test_n_batches_negative_raises_value_error(self) -> None:
+        jobs = _make_jobs(5)
+        with pytest.raises(ValueError, match="n_batches must be a positive integer"):
+            split_into_batches(jobs, n_batches=-1)
+
     def test_batch_size_keyword_still_works(self) -> None:
         """Existing Pass 1 keyword calling convention must not be broken."""
         jobs = _make_jobs(10)
