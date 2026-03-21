@@ -646,6 +646,191 @@ class TestDiscoverCompany:
         ).fetchone()
         assert row["ats_platform"] == "greenhouse"
 
+    def test_zero_rating_company_creates_row_with_name_only(
+        self, conn: sqlite3.Connection, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A company with zero rating and zero reviews gets a row with NULL enrichment fields."""
+        monkeypatch.setenv("RAPIDAPI_KEY", "fake-rapidapi-key")
+        # Glassdoor data with zero rating and zero reviews (zero-rating company)
+        glassdoor_data = {
+            "name": "Zero Rating Corp",
+            "website": "https://zerorating.com",
+            "rating": 0,
+            "review_count": 0,
+        }
+
+        with patch(
+            "pipeline.src.company_discovery._fetch_glassdoor_data",
+            return_value=glassdoor_data,
+        ), patch(
+            "pipeline.src.enrichment.glassdoor_rapidapi._load_cache",
+            return_value={},
+        ), patch(
+            "pipeline.src.company_discovery._probe_career_url",
+            return_value="https://zerorating.com/careers",
+        ), patch(
+            "pipeline.src.company_discovery.requests.get",
+        ) as mock_get, patch(
+            "pipeline.src.company_discovery._call_llm",
+            return_value=json.dumps(ATS_LLM_RESPONSE),
+        ):
+            mock_get.return_value.text = GREENHOUSE_HTML
+            mock_get.return_value.raise_for_status = MagicMock()
+            result = discover_company(
+                company_name="Zero Rating Corp",
+                db_connection=conn,
+            )
+
+        from pipeline.src.company_discovery import CompanyRecord
+
+        assert isinstance(result, CompanyRecord)
+        # The company row must exist
+        row = conn.execute(
+            "SELECT name, glassdoor_rating, glassdoor_url, industry, size_range"
+            " FROM companies WHERE name = 'Zero Rating Corp'"
+        ).fetchone()
+        assert row is not None
+        # All enrichment fields must be NULL for a zero-rating company
+        assert row["glassdoor_rating"] is None
+        assert row["glassdoor_url"] is None
+        assert row["industry"] is None
+        assert row["size_range"] is None
+
+    def test_already_in_db_company_skips_api_call(
+        self, conn: sqlite3.Connection, seeded_company: int
+    ) -> None:
+        """When the company already exists in the DB, no Glassdoor API call is made."""
+        with patch(
+            "pipeline.src.company_discovery._fetch_glassdoor_data"
+        ) as mock_api, patch(
+            "pipeline.src.enrichment.glassdoor_rapidapi._load_cache",
+            return_value={},
+        ):
+            result = discover_company(
+                company_name="Acme Corp",
+                db_connection=conn,
+                # No career_url — should return immediately without API call
+            )
+
+        mock_api.assert_not_called()
+        from pipeline.src.company_discovery import CompanyRecord
+
+        assert isinstance(result, CompanyRecord)
+        assert result.company_id == seeded_company
+
+    def test_glassdoor_api_error_returns_none_for_new_company(
+        self, conn: sqlite3.Connection, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """When the Glassdoor API fails entirely for a new company, discover_company returns None."""
+        monkeypatch.setenv("RAPIDAPI_KEY", "fake-rapidapi-key")
+
+        with patch(
+            "pipeline.src.company_discovery._fetch_glassdoor_data",
+            return_value=None,
+        ), patch(
+            "pipeline.src.enrichment.glassdoor_rapidapi._load_cache",
+            return_value={},
+        ):
+            result = discover_company(
+                company_name="Ghost Corp",
+                db_connection=conn,
+                # No career_url — full Glassdoor path required
+            )
+
+        assert result is None
+        # No company row should have been created
+        row = conn.execute(
+            "SELECT id FROM companies WHERE name = 'Ghost Corp'"
+        ).fetchone()
+        assert row is None
+
+    def test_career_url_probe_failure_creates_record_with_null_career_url(
+        self, conn: sqlite3.Connection, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """When career URL probing fails, a CompanyRecord is returned with career_page_url=None."""
+        monkeypatch.setenv("RAPIDAPI_KEY", "fake-rapidapi-key")
+        # Glassdoor has a website but probing both /careers and /jobs returns None
+        glassdoor_data = {
+            "name": "No Careers Corp",
+            "website": "https://nocareers.com",
+            "rating": 3.5,
+            "review_count": 10,
+        }
+
+        with patch(
+            "pipeline.src.company_discovery._fetch_glassdoor_data",
+            return_value=glassdoor_data,
+        ), patch(
+            "pipeline.src.enrichment.glassdoor_rapidapi._load_cache",
+            return_value={},
+        ), patch(
+            "pipeline.src.company_discovery._probe_career_url",
+            return_value=None,
+        ):
+            result = discover_company(
+                company_name="No Careers Corp",
+                db_connection=conn,
+            )
+
+        from pipeline.src.company_discovery import CompanyRecord
+
+        assert isinstance(result, CompanyRecord)
+        assert result.career_page_url is None
+        # Company row must exist even though career URL was not found
+        row = conn.execute(
+            "SELECT career_page_url FROM companies WHERE name = 'No Careers Corp'"
+        ).fetchone()
+        assert row is not None
+        assert row["career_page_url"] is None
+
+    def test_return_struct_has_company_id_and_career_page_url(
+        self, conn: sqlite3.Connection, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Verifies that CompanyRecord exposes company_id (int) and career_page_url (str | None)."""
+        monkeypatch.setenv("RAPIDAPI_KEY", "fake-rapidapi-key")
+        glassdoor_data = {
+            "name": "Struct Test Corp",
+            "website": "https://structtest.com",
+            "rating": 4.1,
+            "review_count": 120,
+            "company_link": "https://glassdoor.com/overview/structtest",
+            "industry": "Technology",
+            "size": "201-500",
+        }
+
+        mock_html_response = MagicMock()
+        mock_html_response.text = GREENHOUSE_HTML
+        mock_html_response.raise_for_status = MagicMock()
+
+        with patch(
+            "pipeline.src.company_discovery._fetch_glassdoor_data",
+            return_value=glassdoor_data,
+        ), patch(
+            "pipeline.src.enrichment.glassdoor_rapidapi._load_cache",
+            return_value={},
+        ), patch(
+            "pipeline.src.company_discovery._probe_career_url",
+            return_value="https://structtest.com/careers",
+        ), patch(
+            "pipeline.src.company_discovery.requests.get",
+            return_value=mock_html_response,
+        ), patch(
+            "pipeline.src.company_discovery._call_llm",
+            return_value=json.dumps(ATS_LLM_RESPONSE),
+        ):
+            result = discover_company(
+                company_name="Struct Test Corp",
+                db_connection=conn,
+            )
+
+        from pipeline.src.company_discovery import CompanyRecord
+
+        # Verify the return type and all fields of CompanyRecord
+        assert isinstance(result, CompanyRecord)
+        assert isinstance(result.company_id, int)
+        assert result.company_id > 0
+        assert result.career_page_url == "https://structtest.com/careers"
+
 
 # ---------------------------------------------------------------------------
 # rediscover_broken tests

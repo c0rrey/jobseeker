@@ -30,10 +30,12 @@ import pytest
 
 from pipeline.cli import (
     _build_parser,
+    _print_discover_summary,
     _print_enrich_summary,
     _print_fetch_summary,
     _print_prefilter_summary,
     main,
+    run_discover,
     run_enrich,
     run_fetch,
     run_prefilter,
@@ -58,6 +60,10 @@ _PATCH_DEDUP = "pipeline.cli.deduplicate_and_insert"
 _PATCH_DETECT_DUPLICATES = "pipeline.cli.detect_duplicates"
 _PATCH_RUN_ENRICHMENT = "pipeline.cli.run_enrichment"
 _PATCH_RUN_PREFILTER = "pipeline.cli._filter_run_prefilter"
+
+_PATCH_DISCOVER_COMPANY = "pipeline.cli.discover_company"
+_PATCH_GET_NEW_SURVIVORS = "pipeline.cli._get_new_survivor_companies"
+_PATCH_GET_EXISTING_SURVIVORS = "pipeline.cli._get_existing_survivor_company_count"
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -866,3 +872,249 @@ class TestFetchStageDetectDuplicates:
         assert summary["dup_groups"] == 0
         assert summary["dup_jobs"] == 0
         assert summary["dup_representatives"] == 0
+
+
+# ---------------------------------------------------------------------------
+# --discover stage
+# ---------------------------------------------------------------------------
+
+
+def _discover_summary(
+    new_discovered: int = 2,
+    already_existing: int = 1,
+    discovery_failed: int = 0,
+    enrichment: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Build a canonical discover summary dict for test use."""
+    return {
+        "new_discovered": new_discovered,
+        "already_existing": already_existing,
+        "discovery_failed": discovery_failed,
+        "enrichment": enrichment,
+    }
+
+
+class TestDiscoverStage:
+    """Tests for the --discover CLI stage end-to-end."""
+
+    def test_discover_flag_present_in_parser(self) -> None:
+        """--discover flag must be present in the argument parser."""
+        parser = _build_parser()
+        args = parser.parse_args(["--discover"])
+        assert args.discover is True
+
+    def test_run_discover_called_on_discover_flag(
+        self, fake_db_path: str, mock_conn: MagicMock
+    ) -> None:
+        """main(['--discover']) must invoke run_discover and return exit code 0."""
+        summary = _discover_summary()
+        with (
+            patch(_PATCH_INIT_DB),
+            patch(_PATCH_GET_CONNECTION, return_value=mock_conn),
+            patch(_PATCH_GET_DB_PATH, return_value=fake_db_path),
+            patch("pipeline.cli.run_discover", return_value=summary) as mock_run_discover,
+        ):
+            result = main(["--discover"])
+
+        mock_run_discover.assert_called_once()
+        assert result == 0
+
+    def test_discover_summary_printed(
+        self, fake_db_path: str, mock_conn: MagicMock, capsys: pytest.CaptureFixture
+    ) -> None:
+        """The discover summary must be printed to stdout."""
+        summary = _discover_summary(new_discovered=3, already_existing=2, discovery_failed=1)
+        with (
+            patch(_PATCH_INIT_DB),
+            patch(_PATCH_GET_CONNECTION, return_value=mock_conn),
+            patch(_PATCH_GET_DB_PATH, return_value=fake_db_path),
+            patch("pipeline.cli.run_discover", return_value=summary),
+        ):
+            main(["--discover"])
+
+        captured = capsys.readouterr()
+        assert "Discover complete" in captured.out
+        assert "3" in captured.out
+        assert "2" in captured.out
+        assert "1" in captured.out
+
+    def test_run_discover_return_struct_has_required_keys(
+        self, fake_db_path: str, mock_conn: MagicMock
+    ) -> None:
+        """run_discover() return dict must contain new_discovered, already_existing,
+        discovery_failed, and enrichment keys."""
+        from pipeline.src.company_discovery import CompanyRecord
+
+        with (
+            patch(_PATCH_INIT_DB),
+            patch(_PATCH_GET_CONNECTION, return_value=mock_conn),
+            patch(_PATCH_GET_DB_PATH, return_value=fake_db_path),
+            patch(_PATCH_GET_NEW_SURVIVORS, return_value=["Acme Corp", "Beta Corp"]),
+            patch(_PATCH_GET_EXISTING_SURVIVORS, return_value=1),
+            patch(
+                _PATCH_DISCOVER_COMPANY,
+                return_value=CompanyRecord(company_id=1, career_page_url="https://acme.com/careers"),
+            ),
+            patch(_PATCH_RUN_ENRICHMENT, return_value={
+                "companies_processed": 2,
+                "sources_succeeded": {},
+                "sources_failed": {},
+            }),
+        ):
+            summary = run_discover(fake_db_path)
+
+        assert "new_discovered" in summary
+        assert "already_existing" in summary
+        assert "discovery_failed" in summary
+        assert "enrichment" in summary
+        assert isinstance(summary["new_discovered"], int)
+        assert isinstance(summary["already_existing"], int)
+        assert isinstance(summary["discovery_failed"], int)
+
+    def test_run_discover_counts_new_and_already_existing(
+        self, fake_db_path: str, mock_conn: MagicMock
+    ) -> None:
+        """run_discover returns correct counts when some companies are new and some exist."""
+        from pipeline.src.company_discovery import CompanyRecord
+
+        with (
+            patch(_PATCH_INIT_DB),
+            patch(_PATCH_GET_CONNECTION, return_value=mock_conn),
+            patch(_PATCH_GET_DB_PATH, return_value=fake_db_path),
+            patch(_PATCH_GET_NEW_SURVIVORS, return_value=["New Corp A", "New Corp B"]),
+            patch(_PATCH_GET_EXISTING_SURVIVORS, return_value=3),
+            patch(
+                _PATCH_DISCOVER_COMPANY,
+                return_value=CompanyRecord(company_id=10, career_page_url="https://x.com/careers"),
+            ),
+            patch(_PATCH_RUN_ENRICHMENT, return_value={
+                "companies_processed": 2,
+                "sources_succeeded": {},
+                "sources_failed": {},
+            }),
+        ):
+            summary = run_discover(fake_db_path)
+
+        assert summary["new_discovered"] == 2
+        assert summary["already_existing"] == 3
+        assert summary["discovery_failed"] == 0
+
+    def test_run_discover_counts_failed_when_discover_company_returns_none(
+        self, fake_db_path: str, mock_conn: MagicMock
+    ) -> None:
+        """When discover_company returns None, the company is counted as failed."""
+        with (
+            patch(_PATCH_INIT_DB),
+            patch(_PATCH_GET_CONNECTION, return_value=mock_conn),
+            patch(_PATCH_GET_DB_PATH, return_value=fake_db_path),
+            patch(_PATCH_GET_NEW_SURVIVORS, return_value=["Ghost Corp"]),
+            patch(_PATCH_GET_EXISTING_SURVIVORS, return_value=0),
+            patch(_PATCH_DISCOVER_COMPANY, return_value=None),
+        ):
+            summary = run_discover(fake_db_path)
+
+        assert summary["new_discovered"] == 0
+        assert summary["discovery_failed"] == 1
+        assert summary["enrichment"] is None
+
+    def test_run_discover_skips_enrichment_when_no_new_companies(
+        self, fake_db_path: str, mock_conn: MagicMock
+    ) -> None:
+        """When no new companies are discovered, enrichment is skipped (enrichment=None)."""
+        with (
+            patch(_PATCH_INIT_DB),
+            patch(_PATCH_GET_CONNECTION, return_value=mock_conn),
+            patch(_PATCH_GET_DB_PATH, return_value=fake_db_path),
+            patch(_PATCH_GET_NEW_SURVIVORS, return_value=[]),
+            patch(_PATCH_GET_EXISTING_SURVIVORS, return_value=5),
+            patch(_PATCH_RUN_ENRICHMENT) as mock_enrich,
+        ):
+            summary = run_discover(fake_db_path)
+
+        mock_enrich.assert_not_called()
+        assert summary["new_discovered"] == 0
+        assert summary["already_existing"] == 5
+        assert summary["enrichment"] is None
+
+    def test_run_discover_runs_enrichment_when_companies_discovered(
+        self, fake_db_path: str, mock_conn: MagicMock
+    ) -> None:
+        """When at least one company is discovered, run_enrichment is called."""
+        from pipeline.src.company_discovery import CompanyRecord
+
+        enrich_result = {
+            "companies_processed": 1,
+            "sources_succeeded": {"glassdoor": 1},
+            "sources_failed": {},
+        }
+
+        with (
+            patch(_PATCH_INIT_DB),
+            patch(_PATCH_GET_CONNECTION, return_value=mock_conn),
+            patch(_PATCH_GET_DB_PATH, return_value=fake_db_path),
+            patch(_PATCH_GET_NEW_SURVIVORS, return_value=["Fresh Corp"]),
+            patch(_PATCH_GET_EXISTING_SURVIVORS, return_value=0),
+            patch(
+                _PATCH_DISCOVER_COMPANY,
+                return_value=CompanyRecord(company_id=7, career_page_url="https://fresh.com/careers"),
+            ),
+            patch(_PATCH_RUN_ENRICHMENT, return_value=enrich_result) as mock_enrich,
+        ):
+            summary = run_discover(fake_db_path)
+
+        mock_enrich.assert_called_once()
+        assert summary["enrichment"] is not None
+        assert summary["enrichment"]["companies_processed"] == 1
+
+    def test_run_discover_handles_discover_company_exception_as_failed(
+        self, fake_db_path: str, mock_conn: MagicMock
+    ) -> None:
+        """An exception from discover_company is caught; the company is counted as failed."""
+        with (
+            patch(_PATCH_INIT_DB),
+            patch(_PATCH_GET_CONNECTION, return_value=mock_conn),
+            patch(_PATCH_GET_DB_PATH, return_value=fake_db_path),
+            patch(_PATCH_GET_NEW_SURVIVORS, return_value=["Exploding Corp"]),
+            patch(_PATCH_GET_EXISTING_SURVIVORS, return_value=0),
+            patch(_PATCH_DISCOVER_COMPANY, side_effect=RuntimeError("unexpected")),
+        ):
+            summary = run_discover(fake_db_path)
+
+        assert summary["discovery_failed"] == 1
+        assert summary["new_discovered"] == 0
+
+
+# ---------------------------------------------------------------------------
+# _print_discover_summary unit tests
+# ---------------------------------------------------------------------------
+
+
+class TestPrintDiscoverSummary:
+    """Unit tests for the _print_discover_summary formatter."""
+
+    def test_prints_discover_complete(self, capsys: pytest.CaptureFixture) -> None:
+        _print_discover_summary(_discover_summary(new_discovered=2, already_existing=1))
+        assert "Discover complete" in capsys.readouterr().out
+
+    def test_prints_new_discovered_count(self, capsys: pytest.CaptureFixture) -> None:
+        _print_discover_summary(_discover_summary(new_discovered=4))
+        assert "4" in capsys.readouterr().out
+
+    def test_prints_enrichment_skipped_when_no_new_companies(
+        self, capsys: pytest.CaptureFixture
+    ) -> None:
+        _print_discover_summary(_discover_summary(new_discovered=0, enrichment=None))
+        out = capsys.readouterr().out
+        assert "Enrichment skipped" in out or "no new" in out
+
+    def test_prints_enrichment_summary_when_present(
+        self, capsys: pytest.CaptureFixture
+    ) -> None:
+        enrichment = {
+            "companies_processed": 3,
+            "sources_succeeded": {"glassdoor": 3},
+            "sources_failed": {},
+        }
+        _print_discover_summary(_discover_summary(new_discovered=3, enrichment=enrichment))
+        out = capsys.readouterr().out
+        assert "3" in out
