@@ -44,6 +44,9 @@ preferred_locations:
 # Minimum salary (annual, USD)
 salary_min: 150000
 
+# Hard-NO salary floor (annual, USD) — roles explicitly below this are rejected outright
+salary_floor: 120000
+
 # Maximum job age (days) - filter out postings older than this
 max_job_age_days: 90
 
