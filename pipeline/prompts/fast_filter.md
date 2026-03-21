@@ -19,13 +19,13 @@ Return a **JSON array** — one object per job — in the exact format shown in 
 **Vote YES if ALL of the following are true:**
 1. The role title aligns with the candidate's target titles (data engineer, analytics engineer, product analytics, data analyst, or closely related senior IC/staff roles).
 2. The job description suggests seniority level senior, staff, or principal — no junior/associate roles unless the description clearly requires 7+ years.
-3. The compensation signals (if visible) do not clearly fall below $130,000 USD.
+3. The compensation signals (if visible) do not clearly fall below ${{ salary_min }} USD.
 4. The role does not appear to be a pure management role with no individual contributor track.
 5. There is no obvious red flag: no staffing agencies, no junior/internship roles, no roles requiring relocation to non-preferred locations without remote option.
 
 **Vote NO if ANY of the following:**
 - The role is clearly junior or entry-level (0–3 years experience, "associate", "junior", "entry-level" in title or description).
-- The compensation is explicitly listed below $100,000 USD.
+- The compensation is explicitly listed below ${{ salary_floor }} USD.
 - The role is entirely management with no IC component.
 - The description is too thin to evaluate (fewer than 50 words) — treat as NO with confidence 40.
 - The role requires on-site presence in a city that is neither Tampa FL, Orlando FL, nor any remote-friendly location.
