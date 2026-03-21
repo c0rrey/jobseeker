@@ -34,7 +34,20 @@ make db-reset
 make fetch      # Fetch jobs from all sources
 make enrich     # Enrich company metadata
 make prefilter  # Run deterministic pre-filter
-make all        # Run all three stages in sequence
+make all        # Run fetch, prefilter, and enrich in sequence
+```
+
+### Standalone scripts
+
+```bash
+# Fetch full job descriptions for Pass 1 survivors
+python3 -m pipeline.scripts.fetch_descriptions --db data/jseeker.db
+
+# Discover companies from Pass 1 survivors (also available as --discover via CLI)
+python3 -m pipeline.scripts.discover_companies --db data/jseeker.db
+
+# Or use the CLI flag:
+python3 pipeline/cli.py --discover
 ```
 
 ### Web dashboard
@@ -57,7 +70,9 @@ make db-reset   # Delete and recreate the database
 | **fetch** | Pulls jobs from Adzuna, RemoteOK, LinkedIn (RapidAPI), ATS feeds (Greenhouse/Lever/Ashby), and career page crawlers. Deduplicates and inserts into SQLite. |
 | **enrich** | Enriches company records with data from Crunchbase, Glassdoor, Levels.fyi, and StackShare. |
 | **prefilter** | Applies deterministic filters (location, red flags, staleness) to remove obvious non-matches. |
-| **score** | Two-pass LLM scoring (fast filter + deep analysis) run via Claude Code subagents, not the CLI. |
+| **fetch-descriptions** | Fetches full job descriptions for Pass 1 survivors. Rate-limited, idempotent. |
+| **discover** | Finds companies from Pass 1 survivors not yet in the companies table and enriches them. |
+| **score** | Two-pass LLM scoring (fast filter + deep analysis) run via Claude Code subagents, not the CLI. Salary thresholds are driven by `profile.yaml`. |
 | **profile** | Profile evolution analysis and resume improvement suggestions, also via Claude Code. |
 
 ## Project structure
