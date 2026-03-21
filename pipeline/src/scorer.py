@@ -55,6 +55,12 @@ BATCH_SIZE: int = 40
 PASS_1: int = 1
 PASS_2: int = 2
 
+# Maximum description length (chars) sent to the LLM for each pass.
+# Pass 1 (fast_filter) batches are large so we keep payloads small.
+# Pass 2 (deep_scorer) processes fewer jobs so a longer budget is acceptable.
+FAST_FILTER_DESC_CHARS: int = 4000
+DEEP_SCORER_DESC_CHARS: int = 8000
+
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -92,6 +98,12 @@ def get_unscored_jobs(db_connection: sqlite3.Connection) -> list[dict[str, Any]]
     a job that has only a Pass 2 row is correctly identified as having no
     Pass 1 score.
 
+    The ``description`` value in each returned dict is resolved via COALESCE:
+    ``full_description`` is preferred when non-NULL, falling back to the
+    truncated ``description`` column.  The value is capped at
+    :data:`FAST_FILTER_DESC_CHARS` characters to avoid token bloat in the
+    fast-filter LLM batch.
+
     Args:
         db_connection: Open SQLite connection (WAL mode recommended).
 
@@ -100,13 +112,14 @@ def get_unscored_jobs(db_connection: sqlite3.Connection) -> list[dict[str, Any]]
         Empty list when all jobs have been scored.
     """
     cursor = db_connection.execute(
-        """
+        f"""
         SELECT
             j.id,
             j.title,
             j.company,
             j.location,
-            j.description
+            SUBSTR(COALESCE(j.full_description, j.description), 1,
+                   {FAST_FILTER_DESC_CHARS}) AS description
         FROM jobs j
         LEFT JOIN score_dimensions sd
             ON sd.job_id = j.id AND sd.pass = :pass
@@ -132,6 +145,12 @@ def get_stale_scored_jobs(
     ``profile_hash`` that differs from ``current_profile_hash``.  This
     triggers re-scoring so that the candidate profile changes are reflected.
 
+    The ``description`` value in each returned dict is resolved via COALESCE:
+    ``full_description`` is preferred when non-NULL, falling back to the
+    truncated ``description`` column.  The value is capped at
+    :data:`FAST_FILTER_DESC_CHARS` characters to avoid token bloat in the
+    fast-filter LLM batch.
+
     Args:
         db_connection: Open SQLite connection.
         current_profile_hash: SHA-256 hex digest of the current profile state,
@@ -142,13 +161,14 @@ def get_stale_scored_jobs(
         Empty list when no stale rows exist.
     """
     cursor = db_connection.execute(
-        """
+        f"""
         SELECT
             j.id,
             j.title,
             j.company,
             j.location,
-            j.description
+            SUBSTR(COALESCE(j.full_description, j.description), 1,
+                   {FAST_FILTER_DESC_CHARS}) AS description
         FROM jobs j
         INNER JOIN score_dimensions sd
             ON sd.job_id = j.id AND sd.pass = :pass
@@ -327,16 +347,24 @@ def get_pass1_survivors(
         set of keys (compared to Pass 1 queries) allows the deep-scorer
         prompt to access compensation data and company enrichment via the
         company_id FK.
+
+        The ``description`` value is resolved via COALESCE: ``full_description``
+        is preferred when non-NULL, falling back to the truncated ``description``
+        column.  The value is capped at :data:`DEEP_SCORER_DESC_CHARS`
+        characters; this is larger than the Pass 1 cap because the deep scorer
+        processes far fewer jobs per batch.
+
         Empty list when no jobs require Pass 2 scoring.
     """
     cursor = db_connection.execute(
-        """
+        f"""
         SELECT
             j.id,
             j.title,
             j.company,
             j.location,
-            j.description,
+            SUBSTR(COALESCE(j.full_description, j.description), 1,
+                   {DEEP_SCORER_DESC_CHARS}) AS description,
             j.salary_min,
             j.salary_max,
             j.salary_currency,
