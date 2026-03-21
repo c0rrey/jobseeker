@@ -1,5 +1,46 @@
 # Changelog
 
+## 2026-03-21 — Session 20260321-123003 (Glassdoor Enrichment & Discovery Migration + Content Deduplication — T13/T14/T15)
+
+### Summary
+
+Session completed 11 implementation tasks and 4 P2 review-fix commits across 15 total commits. Three epics advanced to done: T13 migrated enrichment from four paid sources (Crunchbase, StackShare, old Glassdoor partner API) to two (Glassdoor RapidAPI + levels.fyi); T14 replaced the SerpAPI-based company discovery flow with Glassdoor API + career URL probing; T15 introduced content-based deduplication with Union-Find grouping, scorer query filters, and score propagation to group members. One review round ran with 17 raw findings consolidated to 10 root causes (P1: 0, P2: 3, P3: 7); all 3 P2s were fixed same-session. Seven P3 crumbs filed (seek-132 – seek-138). Test suite: 584 passed, 1 pre-existing failure.
+
+### Implementation — T13: Glassdoor RapidAPI Enrichment
+
+- **seek-117**: feat: add Glassdoor RapidAPI enrichment module with 90-call/month budget tracker, response cache, and 7-subrating blob — new `glassdoor_rapidapi.py` (519 lines) (`e35430f`)
+- **seek-118**: refactor: update enrichment orchestrator to unconditional 2-source dispatch (glassdoor_rapidapi + levelsfy); remove crunchbase/stackshare imports and `is_crunchbase_enabled` (`69f219e`)
+- **seek-119**: refactor: delete stale paid enrichment modules (crunchbase.py, stackshare.py, glassdoor.py) and 3 stale settings functions (`a0d1932`)
+- **seek-120**: feat: add 34 tests for Glassdoor enrichment module; update orchestrator tests to 2-source architecture (`c51898d`)
+
+### Implementation — T14: Glassdoor-Based Company Discovery
+
+- **seek-121**: feat: replace SerpAPI discovery with Glassdoor API + career URL probing; new `CompanyRecord` datatype; `_probe_career_url` with HEAD→GET fallback (`03cda63`)
+- **seek-122**: refactor: remove all SerpAPI references from discovery module and tests; replace 10 stale test methods with Glassdoor-equivalent tests (`2fa7d15`)
+- **seek-123**: test: add Glassdoor discovery coverage (5 unit tests) and CLI discover stage tests (12 tests) (`02fdea6`)
+
+### Implementation — T15: Content-Based Deduplication
+
+- **seek-124**: feat: add `duplicate_detector.py` with Union-Find grouping; DB schema — `job_duplicate_groups` table, `dup_group_id`/`is_representative` columns on `jobs` with migration (`d52ba14`)
+- **seek-125**: feat: wire `_DUP_FILTER` into 3 scorer queries and `detect_duplicates()` into `run_fetch()` CLI (`93e2308`)
+- **seek-126**: feat: add `propagate_scores(conn, pass_number)` — copies representative scores to all group members via `executemany` (`b3cd6ee`)
+- **seek-127**: test: add 35 deduplication tests, 14 scorer duplicate-awareness tests, 4 CLI wiring tests (`5ae5728`)
+
+### Review Fixes (P2 — same session)
+
+- **seek-129**: fix: remove `enriched_at` write from `glassdoor_rapidapi._update_company` (premature timestamp, RC-1) (`2484572`)
+- **seek-139**: fix: remove `enriched_at` write from `levelsfy._update_company` (same root cause, proactive) (`fbbd183`)
+- **seek-130**: fix: validate `yaml.safe_load` result and guard `get_db_path` against empty-string env var (RC-2) (`238bfc2`)
+- **seek-131**: fix: replace misleading sanitization comment and rename `safe_name` in company_discovery (RC-3) (`effd4f2`)
+
+### Review Statistics
+
+| Round | Scope | P1 | P2 | P3 | Verdict |
+|-------|-------|----|----|----|---------|
+| 1 | 11 tasks, 15 files | 0 | 3 | 7 | PASS WITH ISSUES |
+
+10 root causes consolidated from 17 raw findings (2 cross-session dedups: C-2→seek-113, E-6→seek-112). All 3 P2s auto-fixed same session. 7 P3s filed as seek-132 – seek-138.
+
 ## 2026-03-21 — Session 20260320-233459 (Code Quality Sweep — P3 Polish Wave)
 
 ### Summary
