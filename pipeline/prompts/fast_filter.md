@@ -49,7 +49,7 @@ Each object in the array has these fields:
 - `title`: job title
 - `company`: company name
 - `location`: location string (may be null)
-- `description`: full job description (may be truncated at 2000 characters)
+- `description`: full job description (may be truncated at 4000 characters)
 
 ## Output Format
 

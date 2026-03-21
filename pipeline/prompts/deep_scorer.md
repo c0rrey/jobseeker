@@ -83,7 +83,7 @@ Each object in the array has these fields:
 - `title`: job title
 - `company`: company name
 - `location`: location string (may be null)
-- `description`: full job description (may be truncated at 4000 characters)
+- `description`: full job description (may be truncated at 8000 characters)
 - `salary_min`: minimum salary in USD (may be null)
 - `salary_max`: maximum salary in USD (may be null)
 - `salary_currency`: currency code (may be null; assume USD if null)
