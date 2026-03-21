@@ -6,8 +6,9 @@ Covers:
 - get_stale_scored_jobs: returns jobs whose Pass 1 profile_hash differs from
   the current hash, or is NULL.
 - split_into_batches: correct partitioning for various pool sizes.
-- write_pass1_results: upsert behavior, overall mapping (yes/no), profile_hash
-  persistence, empty input no-op, return value.
+- write_pass1_results: writes a JSON file with the correct envelope structure.
+- upsert_pass1_results_from_files: upsert behavior, overall mapping (yes/no),
+  profile_hash persistence, empty directory no-op, return value.
 - compute_profile_hash: determinism, sensitivity to input changes.
 - Duplicate-aware query filtering: get_unscored_jobs, get_stale_scored_jobs,
   and get_pass1_survivors must return at most one job per duplicate group
@@ -19,6 +20,7 @@ pipeline.src.database.  No LLM calls are made.
 
 from __future__ import annotations
 
+import json
 import sqlite3
 from pathlib import Path
 from typing import Any
@@ -36,6 +38,7 @@ from pipeline.src.scorer import (
     get_stale_scored_jobs,
     get_unscored_jobs,
     split_into_batches,
+    upsert_pass1_results_from_files,
     write_pass1_results,
 )
 
@@ -297,30 +300,109 @@ class TestSplitIntoBatches:
 
 
 # ---------------------------------------------------------------------------
-# write_pass1_results
+# write_pass1_results (file-based output)
 # ---------------------------------------------------------------------------
 
 
 class TestWritePass1Results:
-    def test_empty_results_returns_zero(self, db_conn: sqlite3.Connection) -> None:
-        count = write_pass1_results(db_conn, [])
+    """write_pass1_results writes a JSON envelope to a file; no DB involved."""
+
+    def test_writes_json_file(self, tmp_path: Path) -> None:
+        output = tmp_path / "batch_0.json"
+        results = [{"job_id": 1, "verdict": "yes", "confidence": 85}]
+        write_pass1_results(results, output, profile_hash="abc123")
+        assert output.exists()
+
+    def test_json_envelope_structure(self, tmp_path: Path) -> None:
+        output = tmp_path / "batch_0.json"
+        results = [{"job_id": 1, "verdict": "yes", "confidence": 85, "reasoning": "Good."}]
+        write_pass1_results(results, output, profile_hash="abc123")
+        envelope = json.loads(output.read_text())
+        assert envelope["profile_hash"] == "abc123"
+        assert envelope["results"] == results
+
+    def test_empty_results_writes_empty_envelope(self, tmp_path: Path) -> None:
+        output = tmp_path / "batch_empty.json"
+        write_pass1_results([], output, profile_hash="")
+        envelope = json.loads(output.read_text())
+        assert envelope["results"] == []
+
+    def test_profile_hash_preserved_in_file(self, tmp_path: Path) -> None:
+        output = tmp_path / "batch_0.json"
+        write_pass1_results([{"job_id": 5, "verdict": "no", "confidence": 0}], output, profile_hash="deadbeef")
+        envelope = json.loads(output.read_text())
+        assert envelope["profile_hash"] == "deadbeef"
+
+    def test_multiple_results_all_in_file(self, tmp_path: Path) -> None:
+        results = [
+            {"job_id": 1, "verdict": "yes", "confidence": 90},
+            {"job_id": 2, "verdict": "no", "confidence": 0},
+            {"job_id": 3, "verdict": "yes", "confidence": 55},
+        ]
+        output = tmp_path / "batch_0.json"
+        write_pass1_results(results, output)
+        envelope = json.loads(output.read_text())
+        assert len(envelope["results"]) == 3
+
+
+# ---------------------------------------------------------------------------
+# upsert_pass1_results_from_files (sequential DB upsert)
+# ---------------------------------------------------------------------------
+
+
+class TestUpsertPass1ResultsFromFiles:
+    """upsert_pass1_results_from_files reads JSON files and writes to score_dimensions."""
+
+    def _make_result_file(
+        self,
+        results_dir: Path,
+        filename: str,
+        results: list[dict[str, Any]],
+        profile_hash: str = "",
+    ) -> None:
+        """Helper: write a JSON envelope into results_dir/filename."""
+        file_path = results_dir / filename
+        file_path.write_text(
+            json.dumps({"profile_hash": profile_hash, "results": results}),
+            encoding="utf-8",
+        )
+
+    def test_empty_directory_returns_zero(
+        self, db_conn: sqlite3.Connection, tmp_path: Path
+    ) -> None:
+        results_dir = tmp_path / "pass1_results"
+        results_dir.mkdir()
+        count = upsert_pass1_results_from_files(db_conn, results_dir)
         assert count == 0
 
-    def test_no_row_is_no_row_written_for_empty(
-        self, db_conn: sqlite3.Connection
+    def test_missing_directory_returns_zero(
+        self, db_conn: sqlite3.Connection, tmp_path: Path
     ) -> None:
-        write_pass1_results(db_conn, [])
+        missing = tmp_path / "nonexistent"
+        count = upsert_pass1_results_from_files(db_conn, missing)
+        assert count == 0
+
+    def test_no_row_written_for_empty_directory(
+        self, db_conn: sqlite3.Connection, tmp_path: Path
+    ) -> None:
+        results_dir = tmp_path / "pass1_results"
+        results_dir.mkdir()
+        upsert_pass1_results_from_files(db_conn, results_dir)
         rows = db_conn.execute("SELECT COUNT(*) FROM score_dimensions").fetchone()[0]
         assert rows == 0
 
     def test_yes_verdict_uses_confidence_as_overall(
-        self, db_conn: sqlite3.Connection
+        self, db_conn: sqlite3.Connection, tmp_path: Path
     ) -> None:
+        results_dir = tmp_path / "pass1_results"
+        results_dir.mkdir()
         job_id = _insert_job(db_conn)
-        write_pass1_results(
-            db_conn,
+        self._make_result_file(
+            results_dir,
+            "batch_0.json",
             [{"job_id": job_id, "verdict": "yes", "confidence": 85, "reasoning": "Good fit."}],
         )
+        upsert_pass1_results_from_files(db_conn, results_dir)
         db_conn.commit()
         row = db_conn.execute(
             "SELECT overall FROM score_dimensions WHERE job_id = ? AND pass = 1",
@@ -329,13 +411,17 @@ class TestWritePass1Results:
         assert row["overall"] == 85
 
     def test_no_verdict_sets_overall_to_zero(
-        self, db_conn: sqlite3.Connection
+        self, db_conn: sqlite3.Connection, tmp_path: Path
     ) -> None:
+        results_dir = tmp_path / "pass1_results"
+        results_dir.mkdir()
         job_id = _insert_job(db_conn)
-        write_pass1_results(
-            db_conn,
+        self._make_result_file(
+            results_dir,
+            "batch_0.json",
             [{"job_id": job_id, "verdict": "no", "confidence": 0, "reasoning": "Junior role."}],
         )
+        upsert_pass1_results_from_files(db_conn, results_dir)
         db_conn.commit()
         row = db_conn.execute(
             "SELECT overall FROM score_dimensions WHERE job_id = ? AND pass = 1",
@@ -343,42 +429,64 @@ class TestWritePass1Results:
         ).fetchone()
         assert row["overall"] == 0
 
-    def test_writes_pass_equals_1(self, db_conn: sqlite3.Connection) -> None:
+    def test_writes_pass_equals_1(
+        self, db_conn: sqlite3.Connection, tmp_path: Path
+    ) -> None:
+        results_dir = tmp_path / "pass1_results"
+        results_dir.mkdir()
         job_id = _insert_job(db_conn)
-        write_pass1_results(
-            db_conn, [{"job_id": job_id, "verdict": "yes", "confidence": 70}]
+        self._make_result_file(
+            results_dir,
+            "batch_0.json",
+            [{"job_id": job_id, "verdict": "yes", "confidence": 70}],
         )
+        upsert_pass1_results_from_files(db_conn, results_dir)
         db_conn.commit()
         row = db_conn.execute(
             "SELECT pass FROM score_dimensions WHERE job_id = ?", (job_id,)
         ).fetchone()
         assert row["pass"] == 1
 
-    def test_profile_hash_stored(self, db_conn: sqlite3.Connection) -> None:
+    def test_profile_hash_stored(
+        self, db_conn: sqlite3.Connection, tmp_path: Path
+    ) -> None:
+        results_dir = tmp_path / "pass1_results"
+        results_dir.mkdir()
         job_id = _insert_job(db_conn)
-        write_pass1_results(
-            db_conn,
+        self._make_result_file(
+            results_dir,
+            "batch_0.json",
             [{"job_id": job_id, "verdict": "yes", "confidence": 60}],
             profile_hash="abc123",
         )
+        upsert_pass1_results_from_files(db_conn, results_dir)
         db_conn.commit()
         row = db_conn.execute(
             "SELECT profile_hash FROM score_dimensions WHERE job_id = ?", (job_id,)
         ).fetchone()
         assert row["profile_hash"] == "abc123"
 
-    def test_upsert_replaces_existing_row(self, db_conn: sqlite3.Connection) -> None:
-        """Re-running Pass 1 should replace the existing score_dimensions row."""
+    def test_upsert_replaces_existing_row(
+        self, db_conn: sqlite3.Connection, tmp_path: Path
+    ) -> None:
+        """Re-running upsert should replace the existing score_dimensions row."""
+        results_dir = tmp_path / "pass1_results"
+        results_dir.mkdir()
         job_id = _insert_job(db_conn)
-        # First write
-        write_pass1_results(
-            db_conn, [{"job_id": job_id, "verdict": "yes", "confidence": 50}]
+        self._make_result_file(
+            results_dir,
+            "batch_0.json",
+            [{"job_id": job_id, "verdict": "yes", "confidence": 50}],
         )
+        upsert_pass1_results_from_files(db_conn, results_dir)
         db_conn.commit()
-        # Second write with updated score
-        write_pass1_results(
-            db_conn, [{"job_id": job_id, "verdict": "yes", "confidence": 90}]
+        # Overwrite file with updated score and re-run.
+        self._make_result_file(
+            results_dir,
+            "batch_0.json",
+            [{"job_id": job_id, "verdict": "yes", "confidence": 90}],
         )
+        upsert_pass1_results_from_files(db_conn, results_dir)
         db_conn.commit()
         rows = db_conn.execute(
             "SELECT overall FROM score_dimensions WHERE job_id = ? AND pass = 1",
@@ -387,57 +495,81 @@ class TestWritePass1Results:
         assert len(rows) == 1, "Expected exactly one row after upsert"
         assert rows[0]["overall"] == 90
 
-    def test_returns_count_of_rows_written(self, db_conn: sqlite3.Connection) -> None:
-        ids = [
-            _insert_job(db_conn, url=f"https://example.com/wr{i}") for i in range(5)
-        ]
-        results = [
-            {"job_id": jid, "verdict": "yes", "confidence": 70} for jid in ids
-        ]
-        count = write_pass1_results(db_conn, results)
+    def test_returns_count_of_rows_written(
+        self, db_conn: sqlite3.Connection, tmp_path: Path
+    ) -> None:
+        results_dir = tmp_path / "pass1_results"
+        results_dir.mkdir()
+        ids = [_insert_job(db_conn, url=f"https://example.com/wr{i}") for i in range(5)]
+        self._make_result_file(
+            results_dir,
+            "batch_0.json",
+            [{"job_id": jid, "verdict": "yes", "confidence": 70} for jid in ids],
+        )
+        count = upsert_pass1_results_from_files(db_conn, results_dir)
         assert count == 5
 
-    def test_reasoning_stored(self, db_conn: sqlite3.Connection) -> None:
+    def test_reasoning_stored(
+        self, db_conn: sqlite3.Connection, tmp_path: Path
+    ) -> None:
+        results_dir = tmp_path / "pass1_results"
+        results_dir.mkdir()
         job_id = _insert_job(db_conn)
-        write_pass1_results(
-            db_conn,
-            [
-                {
-                    "job_id": job_id,
-                    "verdict": "yes",
-                    "confidence": 80,
-                    "reasoning": "Strong analytics background alignment.",
-                }
-            ],
+        self._make_result_file(
+            results_dir,
+            "batch_0.json",
+            [{"job_id": job_id, "verdict": "yes", "confidence": 80, "reasoning": "Strong analytics background alignment."}],
         )
+        upsert_pass1_results_from_files(db_conn, results_dir)
         db_conn.commit()
         row = db_conn.execute(
             "SELECT reasoning FROM score_dimensions WHERE job_id = ?", (job_id,)
         ).fetchone()
         assert row["reasoning"] == "Strong analytics background alignment."
 
-    def test_verdict_case_insensitive(self, db_conn: sqlite3.Connection) -> None:
+    def test_verdict_case_insensitive(
+        self, db_conn: sqlite3.Connection, tmp_path: Path
+    ) -> None:
         """Uppercase YES should still map to overall = confidence."""
+        results_dir = tmp_path / "pass1_results"
+        results_dir.mkdir()
         job_id = _insert_job(db_conn)
-        write_pass1_results(
-            db_conn, [{"job_id": job_id, "verdict": "YES", "confidence": 77}]
+        self._make_result_file(
+            results_dir,
+            "batch_0.json",
+            [{"job_id": job_id, "verdict": "YES", "confidence": 77}],
         )
+        upsert_pass1_results_from_files(db_conn, results_dir)
         db_conn.commit()
         row = db_conn.execute(
             "SELECT overall FROM score_dimensions WHERE job_id = ?", (job_id,)
         ).fetchone()
         assert row["overall"] == 77
 
-    def test_multiple_results_all_written(self, db_conn: sqlite3.Connection) -> None:
+    def test_multiple_files_all_processed(
+        self, db_conn: sqlite3.Connection, tmp_path: Path
+    ) -> None:
+        results_dir = tmp_path / "pass1_results"
+        results_dir.mkdir()
         job_ids = [
             _insert_job(db_conn, url=f"https://example.com/multi{i}") for i in range(3)
         ]
-        results = [
-            {"job_id": job_ids[0], "verdict": "yes", "confidence": 90},
-            {"job_id": job_ids[1], "verdict": "no", "confidence": 0},
-            {"job_id": job_ids[2], "verdict": "yes", "confidence": 55},
-        ]
-        write_pass1_results(db_conn, results)
+        self._make_result_file(
+            results_dir,
+            "batch_0.json",
+            [{"job_id": job_ids[0], "verdict": "yes", "confidence": 90}],
+        )
+        self._make_result_file(
+            results_dir,
+            "batch_1.json",
+            [{"job_id": job_ids[1], "verdict": "no", "confidence": 0}],
+        )
+        self._make_result_file(
+            results_dir,
+            "batch_2.json",
+            [{"job_id": job_ids[2], "verdict": "yes", "confidence": 55}],
+        )
+        upsert_pass1_results_from_files(db_conn, results_dir)
         db_conn.commit()
         rows = db_conn.execute(
             "SELECT job_id, overall FROM score_dimensions WHERE pass = 1 ORDER BY job_id"

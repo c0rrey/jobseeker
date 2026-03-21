@@ -7,9 +7,11 @@ Covers:
   profile_hash.
 - split_into_batches (n_batches mode): divides jobs into roughly equal batches
   by count, handles edge cases (empty, fewer jobs than n_batches, exact fit).
-- write_pass2_results: upsert behaviour for all five dimension columns, pass=2,
-  profile_hash persistence, empty input no-op, return value, and single-
-  transaction write for contention safety.
+- write_pass2_results: writes a JSON envelope file with the correct structure
+  for all five dimension columns plus overall and reasoning.
+- upsert_pass2_results_from_files: upsert behaviour for all five dimension
+  columns, pass=2, profile_hash persistence, empty directory no-op, return
+  value, and sequential-write safety (no concurrent DB contention).
 
 All tests use an in-memory SQLite connection initialised via init_db() from
 pipeline.src.database.  No LLM calls are made.
@@ -30,6 +32,7 @@ from pipeline.src.scorer import (
     PASS_2,
     get_pass1_survivors,
     split_into_batches,
+    upsert_pass2_results_from_files,
     write_pass2_results,
 )
 
@@ -357,60 +360,128 @@ class TestSplitIntoBatchesNBatches:
 
 
 # ---------------------------------------------------------------------------
-# write_pass2_results
+# write_pass2_results (file-based output)
 # ---------------------------------------------------------------------------
 
 
 class TestWritePass2Results:
-    def test_empty_results_returns_zero(self, db_conn: sqlite3.Connection) -> None:
-        count = write_pass2_results(db_conn, [])
+    """write_pass2_results writes a JSON envelope to a file; no DB involved."""
+
+    def test_writes_json_file(self, tmp_path: Path) -> None:
+        output = tmp_path / "batch_0.json"
+        results = [{"job_id": 1, "role_fit": 80, "skills_match": 75, "culture_signals": 70,
+                    "growth_potential": 65, "comp_alignment": 80, "overall": 75}]
+        write_pass2_results(results, output, profile_hash="abc123")
+        assert output.exists()
+
+    def test_json_envelope_structure(self, tmp_path: Path) -> None:
+        output = tmp_path / "batch_0.json"
+        results = [{"job_id": 1, "role_fit": 90, "skills_match": 85, "culture_signals": 70,
+                    "growth_potential": 60, "comp_alignment": 75, "overall": 79}]
+        write_pass2_results(results, output, profile_hash="deadbeef")
+        envelope = json.loads(output.read_text())
+        assert envelope["profile_hash"] == "deadbeef"
+        assert envelope["results"] == results
+
+    def test_empty_results_writes_empty_envelope(self, tmp_path: Path) -> None:
+        output = tmp_path / "batch_empty.json"
+        write_pass2_results([], output)
+        envelope = json.loads(output.read_text())
+        assert envelope["results"] == []
+
+    def test_multiple_results_all_in_file(self, tmp_path: Path) -> None:
+        results = [
+            {"job_id": 1, "role_fit": 90, "skills_match": 85, "culture_signals": 80,
+             "growth_potential": 70, "comp_alignment": 85, "overall": 84},
+            {"job_id": 2, "role_fit": 50, "skills_match": 45, "culture_signals": 40,
+             "growth_potential": 35, "comp_alignment": 50, "overall": 45},
+        ]
+        output = tmp_path / "batch_0.json"
+        write_pass2_results(results, output)
+        envelope = json.loads(output.read_text())
+        assert len(envelope["results"]) == 2
+
+
+# ---------------------------------------------------------------------------
+# upsert_pass2_results_from_files (sequential DB upsert)
+# ---------------------------------------------------------------------------
+
+
+class TestUpsertPass2ResultsFromFiles:
+    """upsert_pass2_results_from_files reads JSON files and writes to score_dimensions."""
+
+    def _make_result_file(
+        self,
+        results_dir: Path,
+        filename: str,
+        results: list[dict[str, Any]],
+        profile_hash: str = "",
+    ) -> None:
+        """Helper: write a JSON envelope into results_dir/filename."""
+        file_path = results_dir / filename
+        file_path.write_text(
+            json.dumps({"profile_hash": profile_hash, "results": results}),
+            encoding="utf-8",
+        )
+
+    def test_empty_directory_returns_zero(
+        self, db_conn: sqlite3.Connection, tmp_path: Path
+    ) -> None:
+        results_dir = tmp_path / "pass2_results"
+        results_dir.mkdir()
+        count = upsert_pass2_results_from_files(db_conn, results_dir)
         assert count == 0
 
-    def test_empty_results_writes_no_rows(self, db_conn: sqlite3.Connection) -> None:
-        write_pass2_results(db_conn, [])
+    def test_missing_directory_returns_zero(
+        self, db_conn: sqlite3.Connection, tmp_path: Path
+    ) -> None:
+        missing = tmp_path / "nonexistent"
+        count = upsert_pass2_results_from_files(db_conn, missing)
+        assert count == 0
+
+    def test_empty_directory_writes_no_rows(
+        self, db_conn: sqlite3.Connection, tmp_path: Path
+    ) -> None:
+        results_dir = tmp_path / "pass2_results"
+        results_dir.mkdir()
+        upsert_pass2_results_from_files(db_conn, results_dir)
         rows = db_conn.execute(
             "SELECT COUNT(*) FROM score_dimensions WHERE pass = 2"
         ).fetchone()[0]
         assert rows == 0
 
-    def test_writes_pass_equals_2(self, db_conn: sqlite3.Connection) -> None:
+    def test_writes_pass_equals_2(
+        self, db_conn: sqlite3.Connection, tmp_path: Path
+    ) -> None:
+        results_dir = tmp_path / "pass2_results"
+        results_dir.mkdir()
         job_id = _insert_job(db_conn, url="https://example.com/pass2")
-        write_pass2_results(
-            db_conn,
-            [
-                {
-                    "job_id": job_id,
-                    "role_fit": 80,
-                    "skills_match": 75,
-                    "culture_signals": 70,
-                    "growth_potential": 65,
-                    "comp_alignment": 80,
-                    "overall": 75,
-                }
-            ],
+        self._make_result_file(
+            results_dir,
+            "batch_0.json",
+            [{"job_id": job_id, "role_fit": 80, "skills_match": 75, "culture_signals": 70,
+              "growth_potential": 65, "comp_alignment": 80, "overall": 75}],
         )
+        upsert_pass2_results_from_files(db_conn, results_dir)
         db_conn.commit()
         row = db_conn.execute(
             "SELECT pass FROM score_dimensions WHERE job_id = ?", (job_id,)
         ).fetchone()
         assert row["pass"] == 2
 
-    def test_all_five_dimensions_stored(self, db_conn: sqlite3.Connection) -> None:
+    def test_all_five_dimensions_stored(
+        self, db_conn: sqlite3.Connection, tmp_path: Path
+    ) -> None:
+        results_dir = tmp_path / "pass2_results"
+        results_dir.mkdir()
         job_id = _insert_job(db_conn, url="https://example.com/dims")
-        write_pass2_results(
-            db_conn,
-            [
-                {
-                    "job_id": job_id,
-                    "role_fit": 90,
-                    "skills_match": 85,
-                    "culture_signals": 70,
-                    "growth_potential": 60,
-                    "comp_alignment": 75,
-                    "overall": 79,
-                }
-            ],
+        self._make_result_file(
+            results_dir,
+            "batch_0.json",
+            [{"job_id": job_id, "role_fit": 90, "skills_match": 85, "culture_signals": 70,
+              "growth_potential": 60, "comp_alignment": 75, "overall": 79}],
         )
+        upsert_pass2_results_from_files(db_conn, results_dir)
         db_conn.commit()
         row = db_conn.execute(
             """
@@ -427,23 +498,20 @@ class TestWritePass2Results:
         assert row["comp_alignment"] == 75
         assert row["overall"] == 79
 
-    def test_profile_hash_stored(self, db_conn: sqlite3.Connection) -> None:
+    def test_profile_hash_stored(
+        self, db_conn: sqlite3.Connection, tmp_path: Path
+    ) -> None:
+        results_dir = tmp_path / "pass2_results"
+        results_dir.mkdir()
         job_id = _insert_job(db_conn, url="https://example.com/hash")
-        write_pass2_results(
-            db_conn,
-            [
-                {
-                    "job_id": job_id,
-                    "role_fit": 80,
-                    "skills_match": 70,
-                    "culture_signals": 60,
-                    "growth_potential": 65,
-                    "comp_alignment": 70,
-                    "overall": 71,
-                }
-            ],
+        self._make_result_file(
+            results_dir,
+            "batch_0.json",
+            [{"job_id": job_id, "role_fit": 80, "skills_match": 70, "culture_signals": 60,
+              "growth_potential": 65, "comp_alignment": 70, "overall": 71}],
             profile_hash="deadbeef",
         )
+        upsert_pass2_results_from_files(db_conn, results_dir)
         db_conn.commit()
         row = db_conn.execute(
             "SELECT profile_hash FROM score_dimensions WHERE job_id = ? AND pass = 2",
@@ -452,24 +520,19 @@ class TestWritePass2Results:
         assert row["profile_hash"] == "deadbeef"
 
     def test_empty_profile_hash_stored_as_none(
-        self, db_conn: sqlite3.Connection
+        self, db_conn: sqlite3.Connection, tmp_path: Path
     ) -> None:
+        results_dir = tmp_path / "pass2_results"
+        results_dir.mkdir()
         job_id = _insert_job(db_conn, url="https://example.com/nohash")
-        write_pass2_results(
-            db_conn,
-            [
-                {
-                    "job_id": job_id,
-                    "role_fit": 70,
-                    "skills_match": 70,
-                    "culture_signals": 70,
-                    "growth_potential": 70,
-                    "comp_alignment": 70,
-                    "overall": 70,
-                }
-            ],
+        self._make_result_file(
+            results_dir,
+            "batch_0.json",
+            [{"job_id": job_id, "role_fit": 70, "skills_match": 70, "culture_signals": 70,
+              "growth_potential": 70, "comp_alignment": 70, "overall": 70}],
             profile_hash="",
         )
+        upsert_pass2_results_from_files(db_conn, results_dir)
         db_conn.commit()
         row = db_conn.execute(
             "SELECT profile_hash FROM score_dimensions WHERE job_id = ? AND pass = 2",
@@ -477,7 +540,11 @@ class TestWritePass2Results:
         ).fetchone()
         assert row["profile_hash"] is None
 
-    def test_reasoning_stored(self, db_conn: sqlite3.Connection) -> None:
+    def test_reasoning_stored(
+        self, db_conn: sqlite3.Connection, tmp_path: Path
+    ) -> None:
+        results_dir = tmp_path / "pass2_results"
+        results_dir.mkdir()
         job_id = _insert_job(db_conn, url="https://example.com/reasoning")
         reasoning = json.dumps(
             {
@@ -485,24 +552,16 @@ class TestWritePass2Results:
                 "skills_match": "Covers 9 of 10 required skills; missing Flink.",
                 "culture_signals": "Glassdoor 4.2; positive remote culture reviews.",
                 "growth_potential": "Series C growth stage; greenfield platform scope.",
-                "comp_alignment": "Posted $160k–$185k matches candidate target range.",
+                "comp_alignment": "Posted $160k-$185k matches candidate target range.",
             }
         )
-        write_pass2_results(
-            db_conn,
-            [
-                {
-                    "job_id": job_id,
-                    "role_fit": 85,
-                    "skills_match": 78,
-                    "culture_signals": 72,
-                    "growth_potential": 68,
-                    "comp_alignment": 82,
-                    "overall": 79,
-                    "reasoning": reasoning,
-                }
-            ],
+        self._make_result_file(
+            results_dir,
+            "batch_0.json",
+            [{"job_id": job_id, "role_fit": 85, "skills_match": 78, "culture_signals": 72,
+              "growth_potential": 68, "comp_alignment": 82, "overall": 79, "reasoning": reasoning}],
         )
+        upsert_pass2_results_from_files(db_conn, results_dir)
         db_conn.commit()
         row = db_conn.execute(
             "SELECT reasoning FROM score_dimensions WHERE job_id = ? AND pass = 2",
@@ -511,42 +570,31 @@ class TestWritePass2Results:
         assert row["reasoning"] == reasoning
 
     def test_upsert_replaces_stale_pass2_row(
-        self, db_conn: sqlite3.Connection
+        self, db_conn: sqlite3.Connection, tmp_path: Path
     ) -> None:
-        """Re-running Pass 2 with a new profile_hash replaces the old row."""
+        """Re-running upsert with updated file replaces the old row."""
+        results_dir = tmp_path / "pass2_results"
+        results_dir.mkdir()
         job_id = _insert_job(db_conn, url="https://example.com/upsert")
-        write_pass2_results(
-            db_conn,
-            [
-                {
-                    "job_id": job_id,
-                    "role_fit": 60,
-                    "skills_match": 55,
-                    "culture_signals": 50,
-                    "growth_potential": 45,
-                    "comp_alignment": 60,
-                    "overall": 56,
-                }
-            ],
+        self._make_result_file(
+            results_dir,
+            "batch_0.json",
+            [{"job_id": job_id, "role_fit": 60, "skills_match": 55, "culture_signals": 50,
+              "growth_potential": 45, "comp_alignment": 60, "overall": 56}],
             profile_hash="oldhash",
         )
+        upsert_pass2_results_from_files(db_conn, results_dir)
         db_conn.commit()
 
-        write_pass2_results(
-            db_conn,
-            [
-                {
-                    "job_id": job_id,
-                    "role_fit": 85,
-                    "skills_match": 80,
-                    "culture_signals": 72,
-                    "growth_potential": 68,
-                    "comp_alignment": 82,
-                    "overall": 79,
-                }
-            ],
+        # Overwrite with updated data and re-run.
+        self._make_result_file(
+            results_dir,
+            "batch_0.json",
+            [{"job_id": job_id, "role_fit": 85, "skills_match": 80, "culture_signals": 72,
+              "growth_potential": 68, "comp_alignment": 82, "overall": 79}],
             profile_hash="newhash",
         )
+        upsert_pass2_results_from_files(db_conn, results_dir)
         db_conn.commit()
 
         rows = db_conn.execute(
@@ -557,70 +605,55 @@ class TestWritePass2Results:
         assert rows[0]["overall"] == 79
         assert rows[0]["profile_hash"] == "newhash"
 
-    def test_returns_count_of_rows_written(self, db_conn: sqlite3.Connection) -> None:
-        ids = [
-            _insert_job(db_conn, url=f"https://example.com/count/{i}")
-            for i in range(4)
-        ]
-        results = [
-            {
-                "job_id": job_id,
-                "role_fit": 80,
-                "skills_match": 75,
-                "culture_signals": 70,
-                "growth_potential": 65,
-                "comp_alignment": 80,
-                "overall": 75,
-            }
-            for job_id in ids
-        ]
-        count = write_pass2_results(db_conn, results)
+    def test_returns_count_of_rows_written(
+        self, db_conn: sqlite3.Connection, tmp_path: Path
+    ) -> None:
+        results_dir = tmp_path / "pass2_results"
+        results_dir.mkdir()
+        ids = [_insert_job(db_conn, url=f"https://example.com/count/{i}") for i in range(4)]
+        self._make_result_file(
+            results_dir,
+            "batch_0.json",
+            [
+                {"job_id": job_id, "role_fit": 80, "skills_match": 75, "culture_signals": 70,
+                 "growth_potential": 65, "comp_alignment": 80, "overall": 75}
+                for job_id in ids
+            ],
+        )
+        count = upsert_pass2_results_from_files(db_conn, results_dir)
         assert count == 4
 
-    def test_multiple_results_all_written(self, db_conn: sqlite3.Connection) -> None:
+    def test_multiple_files_all_processed(
+        self, db_conn: sqlite3.Connection, tmp_path: Path
+    ) -> None:
+        results_dir = tmp_path / "pass2_results"
+        results_dir.mkdir()
         id_a = _insert_job(db_conn, url="https://example.com/multi/a")
         id_b = _insert_job(db_conn, url="https://example.com/multi/b")
         id_c = _insert_job(db_conn, url="https://example.com/multi/c")
-
-        write_pass2_results(
-            db_conn,
-            [
-                {
-                    "job_id": id_a,
-                    "role_fit": 90,
-                    "skills_match": 85,
-                    "culture_signals": 80,
-                    "growth_potential": 70,
-                    "comp_alignment": 85,
-                    "overall": 84,
-                },
-                {
-                    "job_id": id_b,
-                    "role_fit": 50,
-                    "skills_match": 45,
-                    "culture_signals": 40,
-                    "growth_potential": 35,
-                    "comp_alignment": 50,
-                    "overall": 45,
-                },
-                {
-                    "job_id": id_c,
-                    "role_fit": 70,
-                    "skills_match": 68,
-                    "culture_signals": 65,
-                    "growth_potential": 60,
-                    "comp_alignment": 72,
-                    "overall": 68,
-                },
-            ],
+        self._make_result_file(
+            results_dir,
+            "batch_0.json",
+            [{"job_id": id_a, "role_fit": 90, "skills_match": 85, "culture_signals": 80,
+              "growth_potential": 70, "comp_alignment": 85, "overall": 84}],
         )
+        self._make_result_file(
+            results_dir,
+            "batch_1.json",
+            [{"job_id": id_b, "role_fit": 50, "skills_match": 45, "culture_signals": 40,
+              "growth_potential": 35, "comp_alignment": 50, "overall": 45}],
+        )
+        self._make_result_file(
+            results_dir,
+            "batch_2.json",
+            [{"job_id": id_c, "role_fit": 70, "skills_match": 68, "culture_signals": 65,
+              "growth_potential": 60, "comp_alignment": 72, "overall": 68}],
+        )
+        upsert_pass2_results_from_files(db_conn, results_dir)
         db_conn.commit()
 
         rows = db_conn.execute(
-            """
-            SELECT job_id, overall FROM score_dimensions
-            WHERE pass = 2 ORDER BY job_id
-            """
+            "SELECT job_id, overall FROM score_dimensions WHERE pass = 2 ORDER BY job_id"
         ).fetchall()
         assert len(rows) == 3
         by_id = {r["job_id"]: r["overall"] for r in rows}
@@ -629,14 +662,18 @@ class TestWritePass2Results:
         assert by_id[id_c] == 68
 
     def test_missing_dimension_defaults_to_zero(
-        self, db_conn: sqlite3.Connection
+        self, db_conn: sqlite3.Connection, tmp_path: Path
     ) -> None:
         """Absent dimension keys in the result dict should default to 0."""
+        results_dir = tmp_path / "pass2_results"
+        results_dir.mkdir()
         job_id = _insert_job(db_conn, url="https://example.com/missing")
-        write_pass2_results(
-            db_conn,
+        self._make_result_file(
+            results_dir,
+            "batch_0.json",
             [{"job_id": job_id, "overall": 50}],
         )
+        upsert_pass2_results_from_files(db_conn, results_dir)
         db_conn.commit()
         row = db_conn.execute(
             """
@@ -652,28 +689,22 @@ class TestWritePass2Results:
         assert row["growth_potential"] == 0
         assert row["comp_alignment"] == 0
 
-    def test_pass1_row_unaffected_by_pass2_write(
-        self, db_conn: sqlite3.Connection
+    def test_pass1_row_unaffected_by_pass2_upsert(
+        self, db_conn: sqlite3.Connection, tmp_path: Path
     ) -> None:
-        """Writing Pass 2 must not disturb an existing Pass 1 row."""
+        """Upserting Pass 2 must not disturb an existing Pass 1 row."""
+        results_dir = tmp_path / "pass2_results"
+        results_dir.mkdir()
         job_id = _insert_job(db_conn, url="https://example.com/p1safe")
         _insert_score(db_conn, job_id, pass_num=PASS_1, overall=88, profile_hash="p1hash")
-
-        write_pass2_results(
-            db_conn,
-            [
-                {
-                    "job_id": job_id,
-                    "role_fit": 82,
-                    "skills_match": 78,
-                    "culture_signals": 70,
-                    "growth_potential": 65,
-                    "comp_alignment": 80,
-                    "overall": 77,
-                }
-            ],
+        self._make_result_file(
+            results_dir,
+            "batch_0.json",
+            [{"job_id": job_id, "role_fit": 82, "skills_match": 78, "culture_signals": 70,
+              "growth_potential": 65, "comp_alignment": 80, "overall": 77}],
             profile_hash="p2hash",
         )
+        upsert_pass2_results_from_files(db_conn, results_dir)
         db_conn.commit()
 
         p1_row = db_conn.execute(

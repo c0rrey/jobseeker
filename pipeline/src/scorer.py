@@ -7,19 +7,40 @@ Pass 1 (fast filter):
 - ``get_unscored_jobs``: jobs with no score_dimensions row at all.
 - ``get_stale_scored_jobs``: jobs whose Pass 1 profile_hash is out of date.
 - ``split_into_batches``: partition a job list into fixed-size chunks.
-- ``write_pass1_results``: upsert Pass 1 scores into score_dimensions.
+- ``write_pass1_results``: write Pass 1 LLM results to a JSON file.
+- ``upsert_pass1_results_from_files``: read all Pass 1 JSON files and upsert
+  into score_dimensions sequentially (no concurrent write contention).
 - ``compute_profile_hash``: deterministic SHA-256 of profile YAML + snapshot.
 
 Pass 2 (deep analysis):
 - ``get_pass1_survivors``: jobs that passed Pass 1 (overall > 0), including
   those with a stale Pass 2 profile_hash that need re-scoring.
-- ``write_pass2_results``: upsert all 5 dimension scores into score_dimensions
-  with pass=2, using a single transaction per call to avoid write contention.
+- ``write_pass2_results``: write Pass 2 LLM results to a JSON file.
+- ``upsert_pass2_results_from_files``: read all Pass 2 JSON files and upsert
+  into score_dimensions sequentially (no concurrent write contention).
+
+Architecture — file-based output with sequential DB upsert
+-----------------------------------------------------------
+Scoring agents (which run in parallel) must never write directly to SQLite
+because concurrent writers corrupt the database even in WAL mode.  Instead:
+
+1. Each scoring agent calls ``write_pass1_results`` / ``write_pass2_results``
+   to persist its raw LLM output to a JSON file under ``data/pass1_results/``
+   or ``data/pass2_results/``.
+
+2. After all agents finish, the orchestrator calls
+   ``upsert_pass1_results_from_files`` / ``upsert_pass2_results_from_files``
+   once in the main process.  These functions read every result file in order
+   and write to ``score_dimensions`` in a single sequential stream, then call
+   ``propagate_scores`` to copy scores to duplicate-group members.
+
+The JSON files serve as an audit trail of raw LLM outputs and allow the upsert
+step to be re-run independently without re-scoring.
 
 The actual LLM subagent calls (fast_filter.md, deep_scorer.md) are the
-caller's responsibility.  This module handles only DB I/O and data shaping so
-that the core logic is testable with an in-memory SQLite connection and no real
-LLM calls.
+caller's responsibility.  This module handles only file/DB I/O and data
+shaping so that the core logic is testable with an in-memory SQLite connection
+and no real LLM calls.
 
 Schema reference (database.py: _CREATE_SCORE_DIMENSIONS):
     score_dimensions(
@@ -32,9 +53,11 @@ Schema reference (database.py: _CREATE_SCORE_DIMENSIONS):
 from __future__ import annotations
 
 import hashlib
+import json
 import logging
 import math
 import sqlite3
+from pathlib import Path
 from typing import Any
 
 from pipeline.src.duplicate_detector import propagate_scores
@@ -255,16 +278,40 @@ def split_into_batches(
 
 
 # ---------------------------------------------------------------------------
-# Write function
+# Default output directories for JSON result files
+# ---------------------------------------------------------------------------
+
+PASS1_RESULTS_DIR: str = "data/pass1_results"
+PASS2_RESULTS_DIR: str = "data/pass2_results"
+
+
+# ---------------------------------------------------------------------------
+# Write functions (file-based — safe for parallel scoring agents)
 # ---------------------------------------------------------------------------
 
 
 def write_pass1_results(
-    db_connection: sqlite3.Connection,
     results: list[dict[str, Any]],
+    output_path: Path,
     profile_hash: str = "",
-) -> int:
-    """Upsert Pass 1 scoring results into the score_dimensions table.
+) -> None:
+    """Write Pass 1 LLM scoring results to a JSON file.
+
+    Scoring agents call this function to persist their raw LLM output.
+    Writing to a file (rather than directly to SQLite) is safe to call from
+    parallel subagent processes because each agent writes to its own distinct
+    ``output_path`` and no SQLite connection is involved.
+
+    The JSON envelope written to disk is::
+
+        {
+            "profile_hash": "<hex>",
+            "results": [ { "job_id": ..., "verdict": ..., ... }, ... ]
+        }
+
+    The actual DB upsert is performed later by
+    :func:`upsert_pass1_results_from_files`, which runs sequentially in the
+    main process after all agents have finished.
 
     Each element of ``results`` is expected to contain at minimum:
         - ``job_id`` (int): database primary key of the job
@@ -272,71 +319,202 @@ def write_pass1_results(
         - ``confidence`` (int): 0–100
         - ``reasoning`` (str | None): LLM explanation text; ``None`` when absent
 
-    Mapping rules:
-        - ``verdict == "no"``  → ``overall = 0``
-        - ``verdict == "yes"`` → ``overall = confidence``
+    Args:
+        results: List of result dicts from the fast-filter subagent.
+        output_path: Destination file path for the JSON envelope.  The parent
+            directory must already exist (callers are responsible for creating
+            it via ``output_path.parent.mkdir(parents=True, exist_ok=True)``).
+        profile_hash: SHA-256 digest of the profile used during scoring.
+            Preserved in the JSON file so the upsert step can stamp each DB
+            row with the correct hash.
 
-    The INSERT OR REPLACE strategy removes the old row (if any) and inserts a
-    fresh one, satisfying the UNIQUE(job_id, pass) constraint while always
-    recording the current ``scored_at`` and ``profile_hash``.
+    Returns:
+        None.  Raises on I/O failure (propagated from ``json.dump``/``open``).
+    """
+    payload: dict[str, Any] = {
+        "profile_hash": profile_hash,
+        "results": results,
+    }
+    output_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    logger.debug(
+        "write_pass1_results: wrote %d results to %s", len(results), output_path
+    )
+
+
+def write_pass2_results(
+    results: list[dict[str, Any]],
+    output_path: Path,
+    profile_hash: str = "",
+) -> None:
+    """Write Pass 2 LLM deep-scoring results to a JSON file.
+
+    Scoring agents call this function to persist their raw LLM output.
+    Writing to a file (rather than directly to SQLite) is safe to call from
+    parallel subagent processes because each agent writes to its own distinct
+    ``output_path`` and no SQLite connection is involved.
+
+    The JSON envelope written to disk is::
+
+        {
+            "profile_hash": "<hex>",
+            "results": [ { "job_id": ..., "role_fit": ..., ... }, ... ]
+        }
+
+    The actual DB upsert is performed later by
+    :func:`upsert_pass2_results_from_files`, which runs sequentially in the
+    main process after all agents have finished.
+
+    Each element of ``results`` must contain:
+        - ``job_id`` (int): database primary key of the job
+        - ``role_fit`` (int): 0-100 role alignment score
+        - ``skills_match`` (int): 0-100 skills match score
+        - ``culture_signals`` (int): 0-100 culture fit score
+        - ``growth_potential`` (int): 0-100 growth opportunity score
+        - ``comp_alignment`` (int): 0-100 compensation alignment score
+        - ``overall`` (int): 0-100 weighted composite score
+        - ``reasoning`` (str | None): JSON-serialised per-dimension explanations
+
+    Args:
+        results: List of result dicts from the deep-scorer subagent.
+        output_path: Destination file path for the JSON envelope.  The parent
+            directory must already exist.
+        profile_hash: SHA-256 digest of the profile used during scoring.
+            Preserved in the JSON file so the upsert step can stamp each DB
+            row with the correct hash.
+
+    Returns:
+        None.  Raises on I/O failure (propagated from ``json.dump``/``open``).
+    """
+    payload: dict[str, Any] = {
+        "profile_hash": profile_hash,
+        "results": results,
+    }
+    output_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    logger.debug(
+        "write_pass2_results: wrote %d results to %s", len(results), output_path
+    )
+
+
+# ---------------------------------------------------------------------------
+# Sequential DB upsert functions (run in main process only)
+# ---------------------------------------------------------------------------
+
+
+def upsert_pass1_results_from_files(
+    db_connection: sqlite3.Connection,
+    results_dir: Path,
+) -> int:
+    """Read all Pass 1 JSON result files and upsert into score_dimensions.
+
+    This function must be called from the main process after all parallel
+    scoring agents have finished writing their result files.  It processes
+    files in sorted order so that upserts are deterministic and reproducible.
+
+    For each result file the function reads the JSON envelope, applies the
+    verdict-to-overall mapping, and executes INSERT OR REPLACE into
+    ``score_dimensions``.  After all files are processed,
+    :func:`~pipeline.src.duplicate_detector.propagate_scores` is called once
+    to copy scores to non-representative duplicate-group members.
+
+    Re-running this function without re-scoring is safe and idempotent: each
+    INSERT OR REPLACE will simply overwrite the previous row with identical
+    data.
+
+    Verdict-to-overall mapping:
+        - ``verdict == "yes"`` → ``overall = confidence``
+        - ``verdict != "yes"`` → ``overall = 0``
 
     Args:
         db_connection: Open SQLite connection.  The caller is responsible for
-            committing or rolling back the enclosing transaction.
-        results: List of result dicts from the fast-filter subagent.
-        profile_hash: SHA-256 digest of the profile used during scoring.
-            Stored in the ``profile_hash`` column so stale detection works on
-            future runs.
+            committing after this function returns.
+        results_dir: Directory containing ``*.json`` result files written by
+            :func:`write_pass1_results`.  Missing or empty directories return 0.
 
     Returns:
-        Number of rows written (inserted or replaced).
+        Total number of rows written (inserted or replaced) across all files.
 
     Raises:
-        sqlite3.IntegrityError: If a ``job_id`` does not reference a valid
-            row in the ``jobs`` table (foreign key violation).
+        sqlite3.IntegrityError: If a ``job_id`` does not reference a valid row
+            in the ``jobs`` table (foreign key violation).
     """
-    if not results:
+    if not results_dir.is_dir():
+        logger.debug(
+            "upsert_pass1_results_from_files: directory does not exist: %s", results_dir
+        )
+        return 0
+
+    result_files = sorted(results_dir.glob("*.json"))
+    if not result_files:
+        logger.debug(
+            "upsert_pass1_results_from_files: no JSON files found in %s", results_dir
+        )
         return 0
 
     rows_written = 0
-    for result in results:
+    for file_path in result_files:
         try:
-            if "job_id" not in result:
-                logger.warning("Skipping Pass 1 result missing 'job_id': %r", result)
-                continue
-            job_id: int = result["job_id"]
-            verdict: str = str(result.get("verdict", "no")).lower()
-            confidence: int = _safe_int(result.get("confidence", 0))
-            reasoning: str | None = result.get("reasoning")
-
-            overall: int = confidence if verdict == "yes" else 0
-
-            db_connection.execute(
-                """
-                INSERT OR REPLACE INTO score_dimensions
-                    (job_id, pass, overall, reasoning, profile_hash, scored_at)
-                VALUES
-                    (:job_id, :pass, :overall, :reasoning, :profile_hash,
-                     datetime('now'))
-                """,
-                {
-                    "job_id": job_id,
-                    "pass": PASS_1,
-                    "overall": overall,
-                    "reasoning": reasoning,
-                    "profile_hash": profile_hash or None,
-                },
-            )
-            rows_written += 1
+            envelope = json.loads(file_path.read_text(encoding="utf-8"))
         except Exception as exc:  # noqa: BLE001
             logger.warning(
-                "Skipping malformed Pass 1 result job_id=%r: %s",
-                result.get("job_id"),
+                "upsert_pass1_results_from_files: skipping unreadable file %s: %s",
+                file_path,
                 exc,
             )
+            continue
+
+        profile_hash: str = envelope.get("profile_hash", "")
+        results: list[dict[str, Any]] = envelope.get("results", [])
+
+        for result in results:
+            try:
+                if "job_id" not in result:
+                    logger.warning(
+                        "Skipping Pass 1 result missing 'job_id' in %s: %r",
+                        file_path,
+                        result,
+                    )
+                    continue
+                job_id: int = result["job_id"]
+                verdict: str = str(result.get("verdict", "no")).lower()
+                confidence: int = _safe_int(result.get("confidence", 0))
+                reasoning: str | None = result.get("reasoning")
+
+                overall: int = confidence if verdict == "yes" else 0
+
+                db_connection.execute(
+                    """
+                    INSERT OR REPLACE INTO score_dimensions
+                        (job_id, pass, overall, reasoning, profile_hash, scored_at)
+                    VALUES
+                        (:job_id, :pass, :overall, :reasoning, :profile_hash,
+                         datetime('now'))
+                    """,
+                    {
+                        "job_id": job_id,
+                        "pass": PASS_1,
+                        "overall": overall,
+                        "reasoning": reasoning,
+                        "profile_hash": profile_hash or None,
+                    },
+                )
+                rows_written += 1
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "Skipping malformed Pass 1 result job_id=%r in %s: %s",
+                    result.get("job_id"),
+                    file_path,
+                    exc,
+                )
+
+        logger.debug(
+            "upsert_pass1_results_from_files: processed %s", file_path.name
+        )
 
     propagated = propagate_scores(db_connection, PASS_1)
-    logger.debug("write_pass1_results: propagated %d Pass 1 scores to group members", propagated)
+    logger.debug(
+        "upsert_pass1_results_from_files: propagated %d Pass 1 scores to group members",
+        propagated,
+    )
 
     return rows_written
 
@@ -421,105 +599,134 @@ def get_pass1_survivors(
 
 
 # ---------------------------------------------------------------------------
-# Pass 2 write function
+# Pass 2 sequential DB upsert function
 # ---------------------------------------------------------------------------
 
 
-def write_pass2_results(
+def upsert_pass2_results_from_files(
     db_connection: sqlite3.Connection,
-    results: list[dict[str, Any]],
-    profile_hash: str = "",
+    results_dir: Path,
 ) -> int:
-    """Upsert Pass 2 deep-scoring results into the score_dimensions table.
+    """Read all Pass 2 JSON result files and upsert into score_dimensions.
 
-    All rows from a single subagent batch are written in one transaction block.
-    The caller is responsible for committing after this function returns, which
-    prevents partial writes and reduces write contention when multiple subagent
-    batches run in parallel (each batch calls this function independently).
+    This function must be called from the main process after all parallel
+    scoring agents have finished writing their result files.  It processes
+    files in sorted order so that upserts are deterministic and reproducible.
 
-    Each element of ``results`` must contain:
-        - ``job_id`` (int): database primary key of the job
-        - ``role_fit`` (int): 0-100 role alignment score
-        - ``skills_match`` (int): 0-100 skills match score
-        - ``culture_signals`` (int): 0-100 culture fit score
-        - ``growth_potential`` (int): 0-100 growth opportunity score
-        - ``comp_alignment`` (int): 0-100 compensation alignment score
-        - ``overall`` (int): 0-100 weighted composite score
-        - ``reasoning`` (str | None): JSON-serialised per-dimension explanations
+    For each result file the function reads the JSON envelope and executes
+    INSERT OR REPLACE into ``score_dimensions`` for each result dict.  After
+    all files are processed,
+    :func:`~pipeline.src.duplicate_detector.propagate_scores` is called once
+    to copy scores to non-representative duplicate-group members.
+
+    Re-running this function without re-scoring is safe and idempotent: each
+    INSERT OR REPLACE will simply overwrite the previous row with identical
+    data.
 
     The overall score is expected to be pre-computed by the LLM using the
     canonical weighting (role_fit 30%, skills_match 25%, culture_signals 15%,
     growth_potential 15%, comp_alignment 15%).
 
-    The INSERT OR REPLACE strategy satisfies the UNIQUE(job_id, pass) constraint
-    while always recording the current ``scored_at`` and ``profile_hash``.
-
     Args:
-        db_connection: Open SQLite connection.  The caller must commit or roll
-            back after this function returns.
-        results: List of result dicts from the deep-scorer subagent.
-        profile_hash: SHA-256 digest of the profile used during scoring.
-            Stored in ``profile_hash`` so staleness detection works on future
-            runs.  Pass an empty string if no profile snapshot exists yet.
+        db_connection: Open SQLite connection.  The caller is responsible for
+            committing after this function returns.
+        results_dir: Directory containing ``*.json`` result files written by
+            :func:`write_pass2_results`.  Missing or empty directories return 0.
 
     Returns:
-        Number of rows written (inserted or replaced).
+        Total number of rows written (inserted or replaced) across all files.
 
     Raises:
         sqlite3.IntegrityError: If a ``job_id`` does not reference a valid row
             in the ``jobs`` table (foreign key violation).
     """
-    if not results:
+    if not results_dir.is_dir():
+        logger.debug(
+            "upsert_pass2_results_from_files: directory does not exist: %s", results_dir
+        )
+        return 0
+
+    result_files = sorted(results_dir.glob("*.json"))
+    if not result_files:
+        logger.debug(
+            "upsert_pass2_results_from_files: no JSON files found in %s", results_dir
+        )
         return 0
 
     rows_written = 0
-    for result in results:
+    for file_path in result_files:
         try:
-            if "job_id" not in result:
-                logger.warning("Skipping Pass 2 result missing 'job_id': %r", result)
-                continue
-            job_id: int = result["job_id"]
-            role_fit: int = _safe_int(result.get("role_fit", 0))
-            skills_match: int = _safe_int(result.get("skills_match", 0))
-            culture_signals: int = _safe_int(result.get("culture_signals", 0))
-            growth_potential: int = _safe_int(result.get("growth_potential", 0))
-            comp_alignment: int = _safe_int(result.get("comp_alignment", 0))
-            overall: int = _safe_int(result.get("overall", 0))
-            reasoning: str | None = result.get("reasoning")
-
-            db_connection.execute(
-                """
-                INSERT OR REPLACE INTO score_dimensions
-                    (job_id, pass, role_fit, skills_match, culture_signals,
-                     growth_potential, comp_alignment, overall, reasoning,
-                     profile_hash, scored_at)
-                VALUES
-                    (:job_id, :pass, :role_fit, :skills_match, :culture_signals,
-                     :growth_potential, :comp_alignment, :overall, :reasoning,
-                     :profile_hash, datetime('now'))
-                """,
-                {
-                    "job_id": job_id,
-                    "pass": PASS_2,
-                    "role_fit": role_fit,
-                    "skills_match": skills_match,
-                    "culture_signals": culture_signals,
-                    "growth_potential": growth_potential,
-                    "comp_alignment": comp_alignment,
-                    "overall": overall,
-                    "reasoning": reasoning,
-                    "profile_hash": profile_hash or None,
-                },
-            )
-            rows_written += 1
+            envelope = json.loads(file_path.read_text(encoding="utf-8"))
         except Exception as exc:  # noqa: BLE001
             logger.warning(
-                "Skipping malformed Pass 2 result job_id=%r: %s",
-                result.get("job_id"),
+                "upsert_pass2_results_from_files: skipping unreadable file %s: %s",
+                file_path,
                 exc,
             )
+            continue
+
+        profile_hash: str = envelope.get("profile_hash", "")
+        results: list[dict[str, Any]] = envelope.get("results", [])
+
+        for result in results:
+            try:
+                if "job_id" not in result:
+                    logger.warning(
+                        "Skipping Pass 2 result missing 'job_id' in %s: %r",
+                        file_path,
+                        result,
+                    )
+                    continue
+                job_id: int = result["job_id"]
+                role_fit: int = _safe_int(result.get("role_fit", 0))
+                skills_match: int = _safe_int(result.get("skills_match", 0))
+                culture_signals: int = _safe_int(result.get("culture_signals", 0))
+                growth_potential: int = _safe_int(result.get("growth_potential", 0))
+                comp_alignment: int = _safe_int(result.get("comp_alignment", 0))
+                overall: int = _safe_int(result.get("overall", 0))
+                reasoning: str | None = result.get("reasoning")
+
+                db_connection.execute(
+                    """
+                    INSERT OR REPLACE INTO score_dimensions
+                        (job_id, pass, role_fit, skills_match, culture_signals,
+                         growth_potential, comp_alignment, overall, reasoning,
+                         profile_hash, scored_at)
+                    VALUES
+                        (:job_id, :pass, :role_fit, :skills_match, :culture_signals,
+                         :growth_potential, :comp_alignment, :overall, :reasoning,
+                         :profile_hash, datetime('now'))
+                    """,
+                    {
+                        "job_id": job_id,
+                        "pass": PASS_2,
+                        "role_fit": role_fit,
+                        "skills_match": skills_match,
+                        "culture_signals": culture_signals,
+                        "growth_potential": growth_potential,
+                        "comp_alignment": comp_alignment,
+                        "overall": overall,
+                        "reasoning": reasoning,
+                        "profile_hash": profile_hash or None,
+                    },
+                )
+                rows_written += 1
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "Skipping malformed Pass 2 result job_id=%r in %s: %s",
+                    result.get("job_id"),
+                    file_path,
+                    exc,
+                )
+
+        logger.debug(
+            "upsert_pass2_results_from_files: processed %s", file_path.name
+        )
 
     propagated = propagate_scores(db_connection, PASS_2)
-    logger.debug("write_pass2_results: propagated %d Pass 2 scores to group members", propagated)
+    logger.debug(
+        "upsert_pass2_results_from_files: propagated %d Pass 2 scores to group members",
+        propagated,
+    )
 
     return rows_written
