@@ -15,6 +15,10 @@ Environment variables:
 Exit codes:
     0: Success (even if some individual fetches failed).
     1: Fatal error (e.g. database not accessible).
+
+``run()`` raises :class:`RuntimeError` on fatal database errors so that the
+CLI wrapper (``pipeline/cli.py``) can propagate failure without inspecting an
+exit-code sentinel.  :func:`main` converts the exception to ``sys.exit(1)``.
 """
 
 from __future__ import annotations
@@ -91,7 +95,9 @@ def _save_description(conn, db_id: int, text: str) -> None:
     conn.commit()
 
 
-def run(db_path: str, rate_limit: float = 1.0, limit: int | None = None) -> int:
+def run(
+    db_path: str, rate_limit: float = 1.0, limit: int | None = None
+) -> dict[str, int]:
     """Fetch full descriptions for all eligible Pass 1 survivor jobs.
 
     Args:
@@ -100,20 +106,26 @@ def run(db_path: str, rate_limit: float = 1.0, limit: int | None = None) -> int:
         limit: Optional cap on jobs processed in this run.
 
     Returns:
-        Exit code: 0 on success, 1 on fatal error.
+        A dict with keys ``"total"``, ``"successful"``, and ``"failed"``
+        (all ``int``).  When no eligible jobs exist all three values are 0.
+
+    Raises:
+        RuntimeError: If the database cannot be opened or the initial query
+            fails.  Callers that need an exit code should catch this and
+            translate to ``sys.exit(1)``.
     """
     try:
         conn = get_connection(db_path)
     except Exception as exc:
         logger.error("Cannot open database %s: %s", db_path, exc)
-        return 1
+        raise RuntimeError(f"Cannot open database {db_path!r}: {exc}") from exc
 
     try:
         try:
             jobs = _get_pass1_survivors_without_description(conn, limit=limit)
         except Exception as exc:
             logger.error("Failed to query Pass 1 survivors: %s", exc)
-            return 1
+            raise RuntimeError(f"Failed to query Pass 1 survivors: {exc}") from exc
 
         total = len(jobs)
         successful = 0
@@ -127,7 +139,7 @@ def run(db_path: str, rate_limit: float = 1.0, limit: int | None = None) -> int:
 
         if total == 0:
             logger.info("Nothing to fetch — all Pass 1 survivors already have descriptions.")
-            return 0
+            return {"total": 0, "successful": 0, "failed": 0}
 
         fetcher = FullDescriptionFetcher(rate_limit_seconds=rate_limit)
 
@@ -158,7 +170,7 @@ def run(db_path: str, rate_limit: float = 1.0, limit: int | None = None) -> int:
             failed,
         )
 
-        return 0
+        return {"total": total, "successful": successful, "failed": failed}
     finally:
         conn.close()
 
@@ -196,7 +208,11 @@ def main() -> None:
     args = parser.parse_args()
 
     db_path = args.db or get_db_path()
-    sys.exit(run(db_path=db_path, rate_limit=args.rate_limit, limit=args.limit))
+    try:
+        run(db_path=db_path, rate_limit=args.rate_limit, limit=args.limit)
+    except RuntimeError:
+        sys.exit(1)
+    sys.exit(0)
 
 
 if __name__ == "__main__":
