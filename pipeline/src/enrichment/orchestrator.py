@@ -1,9 +1,9 @@
 """
 Enrichment orchestrator module.
 
-Coordinates all four enrichment sources (Crunchbase, Glassdoor, levels.fyi,
-StackShare) for every company in the database that has no enrichment data or
-whose enrichment is stale (older than 30 days).
+Coordinates two enrichment sources (Glassdoor via RapidAPI and levels.fyi)
+for every company in the database that has no enrichment data or whose
+enrichment is stale (older than 30 days).
 
 Each source is called independently. A failure in one source is logged and
 counted but does not prevent the remaining sources from running for the same
@@ -25,12 +25,8 @@ import time
 from datetime import datetime, timezone
 from typing import Callable, TypedDict
 
-from pipeline.config.settings import is_crunchbase_enabled
-
-import pipeline.src.enrichment.crunchbase as _crunchbase_mod
-import pipeline.src.enrichment.glassdoor as _glassdoor_mod
+import pipeline.src.enrichment.glassdoor_rapidapi as _glassdoor_mod
 import pipeline.src.enrichment.levelsfy as _levelsfy_mod
-import pipeline.src.enrichment.stackshare as _stackshare_mod
 
 logger = logging.getLogger(__name__)
 
@@ -45,10 +41,8 @@ _STALE_DAYS: int = 30
 # same source, applied as the base delay for exponential backoff retries).
 # ---------------------------------------------------------------------------
 
-_RATE_LIMIT_CRUNCHBASE: float = 1.0
 _RATE_LIMIT_GLASSDOOR: float = 0.5
 _RATE_LIMIT_LEVELSFY: float = 0.25
-_RATE_LIMIT_STACKSHARE: float = 0.5
 
 # Maximum number of retry attempts per source per company (not counting the
 # initial attempt).
@@ -67,10 +61,8 @@ _MAX_BACKOFF: float = 8.0
 #: as direct references so that test patches on the module object take effect
 #: without needing to patch the ``_SOURCES`` list itself.
 _SOURCES: list[tuple[str, object, float]] = [
-    *([("crunchbase", _crunchbase_mod, _RATE_LIMIT_CRUNCHBASE)] if is_crunchbase_enabled() else []),
     ("glassdoor", _glassdoor_mod, _RATE_LIMIT_GLASSDOOR),
     ("levelsfy", _levelsfy_mod, _RATE_LIMIT_LEVELSFY),
-    ("stackshare", _stackshare_mod, _RATE_LIMIT_STACKSHARE),
 ]
 
 
@@ -215,13 +207,13 @@ def _update_enriched_at(conn: sqlite3.Connection, company_id: int) -> None:
 
 
 def run_enrichment(db_connection: sqlite3.Connection) -> EnrichmentSummary:
-    """Run all four enrichment sources for every company needing enrichment.
+    """Run all enrichment sources for every company needing enrichment.
 
     Queries the database for companies where ``enriched_at`` is NULL or older
-    than :data:`_STALE_DAYS` days. For each such company, calls Crunchbase,
-    Glassdoor, levels.fyi, and StackShare enrichment functions independently
-    with exponential backoff. A failure in any single source is logged and
-    counted but does not prevent the remaining sources from running.
+    than :data:`_STALE_DAYS` days. For each such company, calls Glassdoor
+    (via RapidAPI) and levels.fyi enrichment functions independently with
+    exponential backoff. A failure in any single source is logged and counted
+    but does not prevent the remaining sources from running.
 
     After all sources have been attempted for a company, the ``enriched_at``
     timestamp is updated to the current UTC time regardless of which sources
@@ -244,8 +236,8 @@ def run_enrichment(db_connection: sqlite3.Connection) -> EnrichmentSummary:
         conn = get_connection("data/jobs.db")
         summary = run_enrichment(conn)
         print(summary["companies_processed"])   # e.g. 12
-        print(summary["sources_succeeded"])     # {"crunchbase": 10, ...}
-        print(summary["sources_failed"])        # {"glassdoor": 2, ...}
+        print(summary["sources_succeeded"])     # {"glassdoor": 10, "levelsfy": 11}
+        print(summary["sources_failed"])        # {"glassdoor": 2, "levelsfy": 1}
     """
     source_names = [name for name, _, _ in _SOURCES]
     succeeded: dict[str, int] = {name: 0 for name in source_names}
