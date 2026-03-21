@@ -52,6 +52,7 @@ from pipeline.src.fetchers import (
     LinkedInFetcher,
     RemoteOKFetcher,
 )
+# Alias to avoid collision with the run_prefilter stage handler defined below.
 from pipeline.src.filter import run_prefilter as _filter_run_prefilter
 from pipeline.src.normalizer import (
     normalize_adzuna,
