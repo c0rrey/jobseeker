@@ -21,7 +21,7 @@ caller's responsibility.  This module handles only DB I/O and data shaping so
 that the core logic is testable with an in-memory SQLite connection and no real
 LLM calls.
 
-Schema reference (database.py L83-98):
+Schema reference (database.py: _CREATE_SCORE_DIMENSIONS):
     score_dimensions(
         id, job_id, pass, role_fit, skills_match, culture_signals,
         growth_potential, comp_alignment, overall, reasoning,
