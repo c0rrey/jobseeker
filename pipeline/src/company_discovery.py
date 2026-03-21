@@ -471,7 +471,13 @@ def _call_llm(prompt: str) -> Optional[str]:
         if not message.content:
             logger.warning("LLM returned empty content list")
             return None
-        return message.content[0].text
+        block = message.content[0]
+        if not hasattr(block, "text"):
+            logger.warning(
+                "LLM returned non-text content block: %s", type(block).__name__
+            )
+            return None
+        return block.text
     except Exception as exc:  # noqa: BLE001
         logger.warning("LLM call failed: %s", exc)
         return None
@@ -516,10 +522,10 @@ def _upsert_company_row(
     if metadata is not None:
         rating = metadata.get("glassdoor_rating")
         review_count = metadata.get("review_count") or 0
-        is_zero_rating = (rating is None or rating == 0) and review_count == 0
+        is_no_data = (rating is None or rating == 0) and review_count == 0
 
-        if is_zero_rating:
-            # Zero-rating: create row with name only; leave enrichment fields NULL.
+        if is_no_data:
+            # No usable data: create row with name only; leave enrichment fields NULL.
             logger.info(
                 "Glassdoor data for '%s' has zero rating and zero reviews; "
                 "creating company row with name only.",
