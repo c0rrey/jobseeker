@@ -53,10 +53,10 @@ class FullDescriptionFetcher:
         Sleeps for the remainder of the rate-limit window if the previous
         request completed fewer than ``self.rate_limit`` seconds ago.
         """
-        elapsed = time.time() - self.last_request_time
+        elapsed = time.monotonic() - self.last_request_time
         if elapsed < self.rate_limit:
             time.sleep(self.rate_limit - elapsed)
-        self.last_request_time = time.time()
+        self.last_request_time = time.monotonic()
 
     def _clean_text(self, text: str) -> str:
         """Normalise whitespace in extracted text.
