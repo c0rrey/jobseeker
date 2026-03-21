@@ -122,6 +122,18 @@ def get_crunchbase_key() -> str:
     return key
 
 
+def is_crunchbase_enabled() -> bool:
+    """Check whether Crunchbase enrichment is enabled.
+
+    Reads the CRUNCHBASE_ENABLED environment variable. Defaults to False
+    (disabled) since Crunchbase no longer offers a free API tier.
+
+    Returns:
+        True if the variable is set to a truthy value (1, true, yes).
+    """
+    return os.getenv("CRUNCHBASE_ENABLED", "").lower() in ("1", "true", "yes")
+
+
 def get_db_path() -> str:
     """
     Get the database file path from environment variables.

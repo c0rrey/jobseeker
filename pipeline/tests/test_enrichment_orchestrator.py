@@ -1,19 +1,25 @@
 """
 Tests for pipeline/src/enrichment/orchestrator.py.
 
-All four enrichment sources are mocked so no real network calls are made.
+Enrichment sources are mocked so no real network calls are made.
+By default CRUNCHBASE_ENABLED is not set, so the orchestrator runs three
+sources (glassdoor, levelsfy, stackshare).  A dedicated test class verifies
+that setting CRUNCHBASE_ENABLED=true adds crunchbase back to the source list.
+
 Tests verify:
 - companies_needing_enrichment query (NULL and stale enriched_at)
-- all four sources called per company
+- all active sources called per company
 - partial failure: one source fails, others still run
 - enriched_at updated after all sources attempted (success and partial failure)
 - summary dict keys and counts
 - empty database: no companies processed
 - exception inside enrich function treated as failure (logged, not raised)
+- CRUNCHBASE_ENABLED toggle includes/excludes crunchbase
 """
 
 from __future__ import annotations
 
+import importlib
 import sqlite3
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -23,6 +29,7 @@ import pytest
 from pipeline.src.database import init_db
 from pipeline.src.enrichment.orchestrator import (
     EnrichmentSummary,
+    _SOURCES,
     _STALE_DAYS,
     _query_companies_needing_enrichment,
     run_enrichment,
@@ -39,14 +46,14 @@ _PATCH_GLASSDOOR = "pipeline.src.enrichment.glassdoor.enrich"
 _PATCH_LEVELSFY = "pipeline.src.enrichment.levelsfy.enrich"
 _PATCH_STACKSHARE = "pipeline.src.enrichment.stackshare.enrich"
 
-_ALL_PATCH_TARGETS = [
-    _PATCH_CRUNCHBASE,
+# Active sources/targets reflect the default (crunchbase disabled).
+_ACTIVE_PATCH_TARGETS = [
     _PATCH_GLASSDOOR,
     _PATCH_LEVELSFY,
     _PATCH_STACKSHARE,
 ]
 
-_SOURCE_NAMES = ["crunchbase", "glassdoor", "levelsfy", "stackshare"]
+_ACTIVE_SOURCE_NAMES = ["glassdoor", "levelsfy", "stackshare"]
 
 
 # ---------------------------------------------------------------------------
@@ -86,12 +93,12 @@ def _get_enriched_at(conn: sqlite3.Connection, name: str) -> str | None:
 
 
 # ---------------------------------------------------------------------------
-# Helper: patch all four sources with the same return_value
+# Helper: patch all active sources with the same return_value
 # ---------------------------------------------------------------------------
 
 
 class _AllSourcesPatched:
-    """Context manager that patches all four enrichment source modules."""
+    """Context manager that patches all active enrichment source modules."""
 
     def __init__(self, return_value: bool = True) -> None:
         self._return_value = return_value
@@ -99,7 +106,7 @@ class _AllSourcesPatched:
         self.mocks: list[MagicMock] = []
 
     def __enter__(self) -> list[MagicMock]:
-        for target in _ALL_PATCH_TARGETS:
+        for target in _ACTIVE_PATCH_TARGETS:
             p = patch(target, return_value=self._return_value)
             mock = p.start()
             self._patches.append(p)
@@ -112,7 +119,7 @@ class _AllSourcesPatched:
 
 
 def _patch_all_sources(return_value: bool = True) -> "_AllSourcesPatched":
-    """Return a context manager that patches all four source enrich functions."""
+    """Return a context manager that patches all active source enrich functions."""
     return _AllSourcesPatched(return_value=return_value)
 
 
@@ -184,26 +191,26 @@ class TestRunEnrichmentSummaryStructure:
         assert "sources_succeeded" in summary
         assert "sources_failed" in summary
 
-    def test_sources_succeeded_has_four_entries(
+    def test_sources_succeeded_has_active_entries(
         self, db_conn: sqlite3.Connection
     ) -> None:
-        """sources_succeeded contains an entry for each of the four sources."""
+        """sources_succeeded contains an entry for each active source."""
         _insert_company(db_conn, "Alpha Corp")
         with _patch_all_sources(return_value=True):
             summary = run_enrichment(db_conn)
 
-        assert set(summary["sources_succeeded"].keys()) == set(_SOURCE_NAMES)
+        assert set(summary["sources_succeeded"].keys()) == set(_ACTIVE_SOURCE_NAMES)
 
-    def test_sources_failed_has_four_entries(
+    def test_sources_failed_has_active_entries(
         self, db_conn: sqlite3.Connection
     ) -> None:
-        """sources_failed contains an entry for each of the four sources."""
+        """sources_failed contains an entry for each active source."""
         _insert_company(db_conn, "Alpha Corp")
         with _patch_all_sources(return_value=False), \
              patch("pipeline.src.enrichment.orchestrator.time.sleep"):
             summary = run_enrichment(db_conn)
 
-        assert set(summary["sources_failed"].keys()) == set(_SOURCE_NAMES)
+        assert set(summary["sources_failed"].keys()) == set(_ACTIVE_SOURCE_NAMES)
 
 
 # ---------------------------------------------------------------------------
@@ -238,7 +245,7 @@ class TestRunEnrichmentEmptyDatabase:
 
 
 class TestRunEnrichmentAllSucceed:
-    """All four sources return True for every company."""
+    """All active sources return True for every company."""
 
     def test_companies_processed_count(self, db_conn: sqlite3.Connection) -> None:
         """companies_processed equals the number of qualifying companies."""
@@ -277,18 +284,17 @@ class TestRunEnrichmentAllSucceed:
         enriched_at = _get_enriched_at(db_conn, "Alpha Corp")
         assert enriched_at is not None
 
-    def test_all_four_sources_called(self, db_conn: sqlite3.Connection) -> None:
-        """Each of the four source functions is called once per company."""
+    def test_all_active_sources_called(self, db_conn: sqlite3.Connection) -> None:
+        """Each active source function is called once per company."""
         _insert_company(db_conn, "Alpha Corp")
 
-        with patch(_PATCH_CRUNCHBASE, return_value=True) as cb, \
-             patch(_PATCH_GLASSDOOR, return_value=True) as gd, \
+        with patch(_PATCH_GLASSDOOR, return_value=True) as gd, \
              patch(_PATCH_LEVELSFY, return_value=True) as lf, \
              patch(_PATCH_STACKSHARE, return_value=True) as ss:
             run_enrichment(db_conn)
 
         for mock_fn, source in zip(
-            [cb, gd, lf, ss], _SOURCE_NAMES
+            [gd, lf, ss], _ACTIVE_SOURCE_NAMES
         ):
             assert mock_fn.call_count == 1, f"{source} not called once"
             args, _ = mock_fn.call_args
@@ -302,22 +308,20 @@ class TestRunEnrichmentAllSucceed:
 
 
 class TestRunEnrichmentPartialFailure:
-    """One source fails, the other three succeed."""
+    """One source fails, the others succeed."""
 
     def test_failed_source_counted(self, db_conn: sqlite3.Connection) -> None:
         """The failing source appears in sources_failed with count >= 1."""
         _insert_company(db_conn, "Alpha Corp")
 
         # Glassdoor fails, the rest succeed.
-        with patch(_PATCH_CRUNCHBASE, return_value=True), \
-             patch(_PATCH_GLASSDOOR, return_value=False), \
+        with patch(_PATCH_GLASSDOOR, return_value=False), \
              patch(_PATCH_LEVELSFY, return_value=True), \
              patch(_PATCH_STACKSHARE, return_value=True), \
              patch("pipeline.src.enrichment.orchestrator.time.sleep"):
             summary = run_enrichment(db_conn)
 
         assert summary["sources_failed"]["glassdoor"] >= 1
-        assert summary["sources_succeeded"]["crunchbase"] == 1
         assert summary["sources_succeeded"]["levelsfy"] == 1
         assert summary["sources_succeeded"]["stackshare"] == 1
 
@@ -327,8 +331,7 @@ class TestRunEnrichmentPartialFailure:
         """enriched_at is updated even when some sources fail."""
         _insert_company(db_conn, "Alpha Corp", enriched_at=None)
 
-        with patch(_PATCH_CRUNCHBASE, return_value=False), \
-             patch(_PATCH_GLASSDOOR, return_value=False), \
+        with patch(_PATCH_GLASSDOOR, return_value=False), \
              patch(_PATCH_LEVELSFY, return_value=True), \
              patch(_PATCH_STACKSHARE, return_value=True), \
              patch("pipeline.src.enrichment.orchestrator.time.sleep"):
@@ -340,18 +343,16 @@ class TestRunEnrichmentPartialFailure:
     def test_all_sources_called_despite_one_failure(
         self, db_conn: sqlite3.Connection
     ) -> None:
-        """All four sources are called even when one returns False."""
+        """All active sources are called even when one returns False."""
         _insert_company(db_conn, "Alpha Corp")
 
-        with patch(_PATCH_CRUNCHBASE, return_value=True) as cb, \
-             patch(_PATCH_GLASSDOOR, return_value=False) as gd, \
+        with patch(_PATCH_GLASSDOOR, return_value=False) as gd, \
              patch(_PATCH_LEVELSFY, return_value=True) as lf, \
              patch(_PATCH_STACKSHARE, return_value=True) as ss, \
              patch("pipeline.src.enrichment.orchestrator.time.sleep"):
             run_enrichment(db_conn)
 
         # Each mock is called at least once (backoff may trigger retries for gd).
-        assert cb.call_count >= 1
         assert gd.call_count >= 1
         assert lf.call_count >= 1
         assert ss.call_count >= 1
@@ -363,7 +364,7 @@ class TestRunEnrichmentPartialFailure:
 
 
 class TestRunEnrichmentAllFail:
-    """All four sources return False."""
+    """All active sources return False."""
 
     def test_all_sources_failed_count(self, db_conn: sqlite3.Connection) -> None:
         """Each source is counted as failed for each company."""
@@ -373,10 +374,8 @@ class TestRunEnrichmentAllFail:
              patch("pipeline.src.enrichment.orchestrator.time.sleep"):
             summary = run_enrichment(db_conn)
 
-        assert summary["sources_failed"]["crunchbase"] == 1
-        assert summary["sources_failed"]["glassdoor"] == 1
-        assert summary["sources_failed"]["levelsfy"] == 1
-        assert summary["sources_failed"]["stackshare"] == 1
+        for source_name in _ACTIVE_SOURCE_NAMES:
+            assert summary["sources_failed"][source_name] == 1
 
     def test_companies_processed_still_counted(
         self, db_conn: sqlite3.Connection
@@ -417,29 +416,26 @@ class TestRunEnrichmentExceptionHandling:
         """run_enrichment does not re-raise exceptions from enrichment sources."""
         _insert_company(db_conn, "Alpha Corp")
 
-        with patch(_PATCH_CRUNCHBASE, side_effect=RuntimeError("boom")), \
-             patch(_PATCH_GLASSDOOR, return_value=True), \
+        with patch(_PATCH_GLASSDOOR, side_effect=RuntimeError("boom")), \
              patch(_PATCH_LEVELSFY, return_value=True), \
              patch(_PATCH_STACKSHARE, return_value=True), \
              patch("pipeline.src.enrichment.orchestrator.time.sleep"):
             # Should not raise.
             summary = run_enrichment(db_conn)
 
-        assert summary["sources_failed"]["crunchbase"] >= 1
+        assert summary["sources_failed"]["glassdoor"] >= 1
 
     def test_exception_counted_as_failure(self, db_conn: sqlite3.Connection) -> None:
         """A source that raises is recorded in sources_failed."""
         _insert_company(db_conn, "Alpha Corp")
 
-        with patch(_PATCH_CRUNCHBASE, return_value=True), \
-             patch(_PATCH_GLASSDOOR, return_value=True), \
+        with patch(_PATCH_GLASSDOOR, return_value=True), \
              patch(_PATCH_LEVELSFY, side_effect=ValueError("bad data")), \
              patch(_PATCH_STACKSHARE, return_value=True), \
              patch("pipeline.src.enrichment.orchestrator.time.sleep"):
             summary = run_enrichment(db_conn)
 
         assert summary["sources_failed"]["levelsfy"] >= 1
-        assert summary["sources_succeeded"]["crunchbase"] == 1
         assert summary["sources_succeeded"]["glassdoor"] == 1
         assert summary["sources_succeeded"]["stackshare"] == 1
 
@@ -449,8 +445,7 @@ class TestRunEnrichmentExceptionHandling:
         """enriched_at is still updated even when a source raises."""
         _insert_company(db_conn, "Alpha Corp", enriched_at=None)
 
-        with patch(_PATCH_CRUNCHBASE, side_effect=RuntimeError("crash")), \
-             patch(_PATCH_GLASSDOOR, return_value=True), \
+        with patch(_PATCH_GLASSDOOR, side_effect=RuntimeError("crash")), \
              patch(_PATCH_LEVELSFY, return_value=True), \
              patch(_PATCH_STACKSHARE, return_value=True), \
              patch("pipeline.src.enrichment.orchestrator.time.sleep"):
@@ -513,21 +508,57 @@ class TestRunEnrichmentMultipleCompanies:
         _insert_company(db_conn, "Beta Corp")
         _insert_company(db_conn, "Gamma Corp")
 
-        def crunchbase_alternating(company_id: int, name: str, conn: sqlite3.Connection) -> bool:
+        def glassdoor_alternating(company_id: int, name: str, conn: sqlite3.Connection) -> bool:
             """Succeed for Alpha and Gamma, fail for Beta."""
             return name != "Beta Corp"
 
-        with patch(_PATCH_CRUNCHBASE, side_effect=crunchbase_alternating), \
-             patch(_PATCH_GLASSDOOR, return_value=True), \
+        with patch(_PATCH_GLASSDOOR, side_effect=glassdoor_alternating), \
              patch(_PATCH_LEVELSFY, return_value=True), \
              patch(_PATCH_STACKSHARE, return_value=True), \
              patch("pipeline.src.enrichment.orchestrator.time.sleep"):
             summary = run_enrichment(db_conn)
 
         assert summary["companies_processed"] == 3
-        assert summary["sources_succeeded"]["crunchbase"] == 2
-        assert summary["sources_failed"]["crunchbase"] >= 1
-        # Glassdoor/levelsfy/stackshare all succeed for all 3 companies.
-        assert summary["sources_succeeded"]["glassdoor"] == 3
+        assert summary["sources_succeeded"]["glassdoor"] == 2
+        assert summary["sources_failed"]["glassdoor"] >= 1
         assert summary["sources_succeeded"]["levelsfy"] == 3
         assert summary["sources_succeeded"]["stackshare"] == 3
+
+
+# ---------------------------------------------------------------------------
+# CRUNCHBASE_ENABLED toggle
+# ---------------------------------------------------------------------------
+
+
+class TestCrunchbaseEnabledToggle:
+    """Verify CRUNCHBASE_ENABLED env var controls source inclusion."""
+
+    def test_crunchbase_excluded_by_default(self) -> None:
+        """Without CRUNCHBASE_ENABLED, crunchbase is not in _SOURCES."""
+        source_names = [name for name, _, _ in _SOURCES]
+        assert "crunchbase" not in source_names
+
+    def test_crunchbase_included_when_enabled(self) -> None:
+        """Setting CRUNCHBASE_ENABLED=true adds crunchbase to _SOURCES."""
+        import pipeline.src.enrichment.orchestrator as orch_mod
+
+        with patch.dict("os.environ", {"CRUNCHBASE_ENABLED": "true"}):
+            importlib.reload(orch_mod)
+            source_names = [name for name, _, _ in orch_mod._SOURCES]
+
+        # Reload again without the env var to restore default state.
+        importlib.reload(orch_mod)
+
+        assert "crunchbase" in source_names
+
+    def test_crunchbase_excluded_when_disabled(self) -> None:
+        """Setting CRUNCHBASE_ENABLED=false excludes crunchbase from _SOURCES."""
+        import pipeline.src.enrichment.orchestrator as orch_mod
+
+        with patch.dict("os.environ", {"CRUNCHBASE_ENABLED": "false"}):
+            importlib.reload(orch_mod)
+            source_names = [name for name, _, _ in orch_mod._SOURCES]
+
+        importlib.reload(orch_mod)
+
+        assert "crunchbase" not in source_names

@@ -25,6 +25,8 @@ import time
 from datetime import datetime, timezone
 from typing import Callable, TypedDict
 
+from pipeline.config.settings import is_crunchbase_enabled
+
 import pipeline.src.enrichment.crunchbase as _crunchbase_mod
 import pipeline.src.enrichment.glassdoor as _glassdoor_mod
 import pipeline.src.enrichment.levelsfy as _levelsfy_mod
@@ -65,7 +67,7 @@ _MAX_BACKOFF: float = 8.0
 #: as direct references so that test patches on the module object take effect
 #: without needing to patch the ``_SOURCES`` list itself.
 _SOURCES: list[tuple[str, object, float]] = [
-    ("crunchbase", _crunchbase_mod, _RATE_LIMIT_CRUNCHBASE),
+    *([("crunchbase", _crunchbase_mod, _RATE_LIMIT_CRUNCHBASE)] if is_crunchbase_enabled() else []),
     ("glassdoor", _glassdoor_mod, _RATE_LIMIT_GLASSDOOR),
     ("levelsfy", _levelsfy_mod, _RATE_LIMIT_LEVELSFY),
     ("stackshare", _stackshare_mod, _RATE_LIMIT_STACKSHARE),
