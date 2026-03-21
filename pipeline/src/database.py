@@ -8,12 +8,14 @@ sequential writers from the pipeline do not deadlock.
 
 Tables (in dependency order so FK targets are created first):
     companies
+    job_duplicate_groups
     jobs
     score_dimensions
     feedback
     profile_snapshots
     career_page_configs
     profile_suggestions
+    glassdoor_api_usage
 """
 
 from __future__ import annotations
@@ -51,6 +53,13 @@ _CREATE_COMPANIES_INDICES = [
     "CREATE INDEX IF NOT EXISTS idx_companies_domain ON companies(domain);",
 ]
 
+_CREATE_JOB_DUPLICATE_GROUPS = """
+CREATE TABLE IF NOT EXISTS job_duplicate_groups (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+"""
+
 _CREATE_JOBS = """
 CREATE TABLE IF NOT EXISTS jobs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -72,7 +81,9 @@ CREATE TABLE IF NOT EXISTS jobs (
     ats_platform TEXT,
     raw_json TEXT,
     dedup_hash TEXT,
-    full_description TEXT
+    full_description TEXT,
+    dup_group_id INTEGER REFERENCES job_duplicate_groups(id),
+    is_representative INTEGER NOT NULL DEFAULT 0
 );
 """
 
@@ -164,15 +175,25 @@ _CREATE_PROFILE_SUGGESTIONS_INDICES = [
     "CREATE INDEX IF NOT EXISTS idx_profile_suggestions_status ON profile_suggestions(status);",
 ]
 
+_CREATE_GLASSDOOR_API_USAGE = """
+CREATE TABLE IF NOT EXISTS glassdoor_api_usage (
+    id      INTEGER PRIMARY KEY CHECK (id = 1),
+    month   TEXT    NOT NULL,
+    count   INTEGER NOT NULL DEFAULT 0
+);
+"""
+
 # Ordered list: (CREATE TABLE sql, [index sqls, ...])
 _SCHEMA: list[tuple[str, list[str]]] = [
     (_CREATE_COMPANIES, _CREATE_COMPANIES_INDICES),
+    (_CREATE_JOB_DUPLICATE_GROUPS, []),
     (_CREATE_JOBS, _CREATE_JOBS_INDICES),
     (_CREATE_SCORE_DIMENSIONS, _CREATE_SCORE_DIMENSIONS_INDICES),
     (_CREATE_FEEDBACK, _CREATE_FEEDBACK_INDICES),
     (_CREATE_PROFILE_SNAPSHOTS, []),
     (_CREATE_CAREER_PAGE_CONFIGS, _CREATE_CAREER_PAGE_CONFIGS_INDICES),
     (_CREATE_PROFILE_SUGGESTIONS, _CREATE_PROFILE_SUGGESTIONS_INDICES),
+    (_CREATE_GLASSDOOR_API_USAGE, []),
 ]
 
 # Expected table names — used by callers that verify schema completeness.
@@ -185,6 +206,8 @@ EXPECTED_TABLES: frozenset[str] = frozenset(
         "profile_snapshots",
         "career_page_configs",
         "profile_suggestions",
+        "job_duplicate_groups",
+        "glassdoor_api_usage",
     }
 )
 
@@ -264,6 +287,16 @@ def init_db(db_path: str | Path) -> None:
         jobs_cols = {row[1] for row in conn.execute("PRAGMA table_info(jobs)")}
         if "full_description" not in jobs_cols:
             conn.execute("ALTER TABLE jobs ADD COLUMN full_description TEXT")
+        # Migration: add duplicate-detection columns to jobs for existing databases.
+        if "dup_group_id" not in jobs_cols:
+            conn.execute(
+                "ALTER TABLE jobs ADD COLUMN dup_group_id INTEGER"
+                " REFERENCES job_duplicate_groups(id)"
+            )
+        if "is_representative" not in jobs_cols:
+            conn.execute(
+                "ALTER TABLE jobs ADD COLUMN is_representative INTEGER NOT NULL DEFAULT 0"
+            )
         conn.commit()
     finally:
         conn.close()
