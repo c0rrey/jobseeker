@@ -32,7 +32,7 @@ Each feedback object has these fields:
 - `location`: job location (may be null)
 - `overall`: composite score 0–100 (may be null)
 - `role_fit`: role fit score 0–100 (may be null)
-- `skills_match`: skills gap score 0–100 (may be null)
+- `skills_match`: skills match score 0–100 (may be null)
 - `culture_signals`: culture signals score 0–100 (may be null)
 - `growth_potential`: growth potential score 0–100 (may be null)
 - `comp_alignment`: compensation alignment score 0–100 (may be null)
