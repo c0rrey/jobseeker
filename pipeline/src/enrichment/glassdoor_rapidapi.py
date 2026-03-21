@@ -427,17 +427,15 @@ def _update_company(
             existing_data = {}
 
     merged = {**existing_data, "glassdoor": glassdoor_blob}
-    now = datetime.now(timezone.utc).isoformat()
 
     conn.execute(
         """
         UPDATE companies
         SET    glassdoor_rating = ?,
-               crunchbase_data  = ?,
-               enriched_at      = ?
+               crunchbase_data  = ?
         WHERE  id = ?
         """,  # noqa: S608
-        (glassdoor_rating, json.dumps(merged), now, company_id),
+        (glassdoor_rating, json.dumps(merged), company_id),
     )
     conn.commit()
 

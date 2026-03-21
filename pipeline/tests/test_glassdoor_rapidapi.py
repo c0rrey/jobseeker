@@ -431,10 +431,15 @@ class TestEnrichSuccess:
         assert "work_life_balance_rating" in glassdoor_sub
         assert "compensation_and_benefits_rating" in glassdoor_sub
 
-    def test_enriched_at_is_updated_on_success(
+    def test_enriched_at_not_written_by_glassdoor_module(
         self, db_conn: sqlite3.Connection
     ) -> None:
-        """enriched_at is written when enrichment succeeds."""
+        """enriched_at must NOT be written by the glassdoor module.
+
+        Only the orchestrator's _update_enriched_at should set this timestamp,
+        after all sources have been attempted.  Writing it here would mask
+        partial enrichment when a crash occurs mid-pipeline (seek-129).
+        """
         company_id = _insert_company(db_conn, "Acme")
 
         mock_resp = MagicMock()
@@ -446,7 +451,7 @@ class TestEnrichSuccess:
             enrich(company_id, "Acme", db_conn)
 
         row = _get_company_row(db_conn, company_id)
-        assert row["enriched_at"] is not None
+        assert row["enriched_at"] is None
 
     def test_existing_crunchbase_keys_preserved(
         self, db_conn: sqlite3.Connection
