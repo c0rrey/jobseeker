@@ -1,5 +1,40 @@
 # Changelog
 
+## 2026-03-21 — Session 20260321-164550 (Scorer File-Based Output + Code Quality Fixes + 2-Round Review)
+
+### Summary
+
+Session completed 16 tasks across three implementation waves plus a two-round review cycle. Wave 1 refactored LLM scoring in `scorer.py` to a file-based intermediate output pattern, eliminating concurrent SQLite write contention. Waves 2 and 3 addressed 12 pre-planned code quality tasks: numeric input validation, stale docstrings, test fixture cleanup, Python 2-style counter idioms, and defensive guards in `company_discovery.py` and `duplicate_detector.py`. An unlabeled commit also introduced a title similarity gate and a new `fetch_descriptions_ldjson.py` script. Round 1 review found 3 P2 and 13 P3 issues; the 3 P2s were auto-fixed and verified clean in round 2. The 13 P3s were filed as seek-147 through seek-159 for a future cleanup session. 14 commits total.
+
+### Implementation (Waves 1–3)
+
+- **seek-140**: refactor: file-based LLM scoring output with sequential DB upsert — split write/upsert responsibilities in `scorer.py`; restructure `test_scorer.py` and `test_scorer_deep.py` (`cb6b03e`)
+- **seek-112 + seek-116 + seek-133**: fix/docs: numeric input guards in `scorer.py`, `full_description_fetcher.py`, `fetch_descriptions.py`; document `PASS_REJECTED` sentinel; fix stale docstrings in `settings.py`, `enrichment/__init__.py`, `duplicate_detector.py`, `scorer.py` (`f26a022`)
+- **seek-113**: docs: add explanatory comment above import alias in `cli.py` (`5e7fff6`)
+- **seek-114**: fix(config): add `[SOFT]`/`[HARD]` inline tags to `salary_min`/`salary_floor` in `profile.yaml` (`f80d835`)
+- **seek-115 + seek-136**: docs: fix `_apply_connection_settings` docstring and document PRAGMA table_info schema in `database.py` (`4949a63`)
+- **seek-132**: fix: replace stale crunchbase source keys with glassdoor/levelsfy in `test_cli.py` fixtures (`079866d`)
+- **seek-134**: refactor: replace Python 2-style counters with `itertools.count()` in `test_duplicate_detector.py` and `test_scorer.py` (`c2fe69a`)
+- **(unlabeled)**: fix: add title similarity gate to `duplicate_detector.py` and introduce `fetch_descriptions_ldjson.py` LD+JSON fetcher (`1015724`)
+- **seek-135 + seek-137**: fix: rename `is_zero_rating` → `is_no_data`; add `hasattr` guard for non-text LLM content blocks in `company_discovery.py` (`fa21096`)
+- **seek-138**: fix: exclude empty-string company names from duplicate grouping in `duplicate_detector.py` (`877a6f9`)
+
+### Review Fixes (Round 1)
+
+- **seek-146**: fix: raise `ValueError` for `n_batches<=0` in `split_into_batches`; add two new tests (`ff69553`)
+- **seek-145**: fix: iterate all content blocks in `_call_llm` to find first `TextBlock`; remove dead phases 3–5; update `test_company_discovery.py` (`64adc8b`, `c281209`)
+- **seek-144**: fix: rename `salary_min`/`salary_floor` → `salary_target`/`salary_min` across `profile.yaml`, `filter.py`, `adzuna.py`, prompts, and five test files (`ba0b111`)
+
+### Review Statistics
+
+| Round | Scope | P1 | P2 | P3 | Verdict |
+|-------|-------|----|----|-----|---------|
+| 1 | 13 tasks, 24 files | 0 | 3 | 13 | PASS WITH ISSUES |
+| 2 | 3 fix commits | 0 | 0 | 0 | PASS |
+
+16 root causes consolidated (0 merges). All 3 P2s auto-fixed and verified clean. 13 P3s filed as seek-147–seek-159.
+
+
 ## 2026-03-21 — Session 20260321-123003 (Glassdoor Enrichment & Discovery Migration + Content Deduplication — T13/T14/T15)
 
 ### Summary
