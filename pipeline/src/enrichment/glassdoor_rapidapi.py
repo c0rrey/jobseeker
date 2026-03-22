@@ -40,7 +40,7 @@ logger = logging.getLogger(__name__)
 
 _BASE_URL = "https://real-time-glassdoor-data.p.rapidapi.com/company-overview"
 _TIMEOUT = 10  # seconds, per project convention
-_MONTHLY_BUDGET = 90
+_MONTHLY_BUDGET = 9000
 _STALE_DAYS = 30
 
 # Resolve the cache file relative to this module's location:
