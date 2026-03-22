@@ -509,6 +509,15 @@ def _build_parser() -> argparse.ArgumentParser:
         ),
     )
     group.add_argument(
+        "--format-descriptions",
+        action="store_true",
+        dest="format_descriptions",
+        help=(
+            "Format job descriptions for Pass 2 survivors with NULL "
+            "formatted_description. Prints examined/formatted/skipped counts."
+        ),
+    )
+    group.add_argument(
         "--enrich",
         action="store_true",
         help="Run the enrichment orchestrator on companies needing enrichment.",
@@ -517,15 +526,6 @@ def _build_parser() -> argparse.ArgumentParser:
         "--prefilter",
         action="store_true",
         help="Run the deterministic pre-filter on unfiltered jobs.",
-    )
-    group.add_argument(
-        "--format-descriptions",
-        action="store_true",
-        dest="format_descriptions",
-        help=(
-            "Format job descriptions for Pass 2 survivors with NULL "
-            "formatted_description. Prints examined/formatted/skipped counts."
-        ),
     )
     group.add_argument(
         "--discover",
@@ -542,7 +542,8 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help=(
             "Run fetch, fetch-descriptions, prefilter, and enrich in sequence. "
-            "Does NOT include --discover (requires Pass 1 scoring first)."
+            "Does NOT include --discover or --format-descriptions "
+            "(both require scoring stages handled by subagents)."
         ),
     )
 
