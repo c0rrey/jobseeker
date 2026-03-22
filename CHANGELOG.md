@@ -1,5 +1,32 @@
 # Changelog
 
+## 2026-03-22 — Session 20260321-201656 (formatted_description pipeline and markdown rendering)
+
+### Summary
+
+Six tasks completed across a two-wave implementation run and a two-round review cycle. Wave 1 added the `formatted_description` column to the SQLite jobs schema (DDL + idempotent migration) and the TypeScript `Job` interface. Wave 2 implemented the description formatter module (`pipeline/src/description_formatter.py`) with an injectable LLM callable, a Jinja-style prompt file, and 28 hermetic tests, while a parallel agent wired markdown rendering into the webapp detail page using `react-markdown`, `rehype-sanitize`, and `@tailwindcss/typography`. Round 1 review found 1 P1, 2 P2, and 4 P3 issues across 10 raw findings (7 root causes); all three auto-fixable items landed in the same session. Round 2 returned a clean PASS. Four P3s deferred as seek-175–seek-178. 6 commits total.
+
+### Implementation (Waves 1–2)
+
+- **seek-163**: feat: add `formatted_description TEXT` column to `_CREATE_JOBS` DDL, idempotent `init_db()` migration with fresh PRAGMA re-read, and `full_description`/`formatted_description` fields in TypeScript `Job` interface — 4 new migration tests (`437a121`)
+- **seek-164**: feat: create `pipeline/src/description_formatter.py` with `format_descriptions(db_path)` public API, injectable LLM callable, deferred `anthropic` import, 32 000-char truncation guard, and `pipeline/prompts/format_description.md` — 28 new tests, 28/28 pass (`1ac1143`)
+- **seek-165**: feat: render job descriptions as markdown in webapp detail page using `react-markdown` + `rehype-sanitize` + `@tailwindcss/typography`; fallback chain `formatted_description ?? full_description ?? description`; page stays RSC (`4ec0c5f`)
+
+### Review Fixes (Round 1)
+
+- **seek-172**: fix: correct `init_db` docstring — "must already exist" → "are created automatically if they do not exist" (`6345384`)
+- **seek-173**: fix: update stale "7 tables" references to "9" in `test_database.py` docstring and test name (`fa1c848`)
+- **seek-174**: fix: guard `message.content[0]` access with empty-content check in `description_formatter.py` (`0db5c7c`)
+
+### Review Statistics
+
+| Round | Scope | P1 | P2 | P3 | Verdict |
+|-------|-------|----|----|-----|---------|
+| 1 | 3 tasks, 6 files | 1 | 2 | 4 | PASS WITH ISSUES |
+| 2 | fix commits only | 0 | 0 | 0 | PASS |
+
+10 raw findings → 7 root causes (1 4-way merge). All P1/P2s auto-fixed; 4×P3 deferred as seek-175–seek-178.
+
 ## 2026-03-21 — Session 191107 (fetch-descriptions CLI integration and fix cycle)
 
 ### Summary
