@@ -268,6 +268,108 @@ class TestGetConnection:
 
 
 # ---------------------------------------------------------------------------
+# Migration: formatted_description column
+# ---------------------------------------------------------------------------
+
+
+class TestFormattedDescriptionMigration:
+    """Verify formatted_description column exists after init_db() and that
+    migration is idempotent (AC1, AC2, AC3 from seek-163)."""
+
+    def _jobs_column_names(self, db_path: Path) -> set[str]:
+        with sqlite3.connect(str(db_path)) as conn:
+            rows = conn.execute("PRAGMA table_info(jobs);").fetchall()
+        return {row[1] for row in rows}
+
+    def test_fresh_db_has_formatted_description(self, tmp_path: Path) -> None:
+        """After init_db() on a fresh database, formatted_description column exists."""
+        path = tmp_path / "fresh.db"
+        init_db(path)
+        cols = self._jobs_column_names(path)
+        assert "formatted_description" in cols, (
+            f"formatted_description not found in jobs columns: {sorted(cols)}"
+        )
+
+    def test_existing_db_without_column_gets_migrated(self, tmp_path: Path) -> None:
+        """init_db() adds formatted_description to an existing database that lacks it.
+
+        Simulates a real legacy database by first running init_db() to build the
+        full current schema, then directly adding a column-free copy of the jobs
+        table is not possible without DDL rewrite.  Instead, we verify the migration
+        code path by constructing the pre-migration state with raw SQLite: drop the
+        jobs table and recreate it without formatted_description, then call init_db().
+        """
+        path = tmp_path / "legacy.db"
+        # Step 1 — let init_db create every supporting table + index exactly as
+        # production would.  This avoids hand-rolling each supporting table.
+        init_db(path)
+
+        # Step 2 — drop and recreate jobs without formatted_description to simulate
+        # the pre-migration state.  SQLite does not support DROP COLUMN in older
+        # versions, so we recreate the table.
+        with sqlite3.connect(str(path)) as conn:
+            conn.executescript(
+                """
+                PRAGMA foreign_keys = OFF;
+                DROP TABLE jobs;
+                CREATE TABLE jobs (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    source TEXT NOT NULL,
+                    source_type TEXT NOT NULL,
+                    external_id TEXT,
+                    url TEXT UNIQUE NOT NULL,
+                    title TEXT NOT NULL,
+                    company TEXT NOT NULL,
+                    company_id INTEGER REFERENCES companies(id),
+                    location TEXT,
+                    description TEXT,
+                    salary_min REAL,
+                    salary_max REAL,
+                    salary_currency TEXT,
+                    posted_at TEXT,
+                    fetched_at TEXT NOT NULL DEFAULT (datetime('now')),
+                    last_seen_at TEXT NOT NULL DEFAULT (datetime('now')),
+                    ats_platform TEXT,
+                    raw_json TEXT,
+                    dedup_hash TEXT,
+                    full_description TEXT,
+                    dup_group_id INTEGER REFERENCES job_duplicate_groups(id),
+                    is_representative INTEGER NOT NULL DEFAULT 0
+                );
+                PRAGMA foreign_keys = ON;
+                """
+            )
+
+        # Verify column is absent before migration.
+        cols_before = self._jobs_column_names(path)
+        assert "formatted_description" not in cols_before
+
+        init_db(path)
+
+        cols_after = self._jobs_column_names(path)
+        assert "formatted_description" in cols_after, (
+            f"formatted_description not added by migration: {sorted(cols_after)}"
+        )
+
+    def test_migration_is_idempotent(self, tmp_path: Path) -> None:
+        """Calling init_db() twice on the same database does not raise."""
+        path = tmp_path / "idempotent.db"
+        init_db(path)
+        init_db(path)  # Must not raise
+
+    def test_formatted_description_column_type_is_text(self, tmp_path: Path) -> None:
+        """The formatted_description column must have type TEXT."""
+        path = tmp_path / "type_check.db"
+        init_db(path)
+        with sqlite3.connect(str(path)) as conn:
+            rows = conn.execute("PRAGMA table_info(jobs);").fetchall()
+        col_types = {row[1]: row[2] for row in rows}
+        assert col_types.get("formatted_description") == "TEXT", (
+            f"Expected TEXT, got {col_types.get('formatted_description')!r}"
+        )
+
+
+# ---------------------------------------------------------------------------
 # init_db WAL check
 # ---------------------------------------------------------------------------
 

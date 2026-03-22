@@ -82,6 +82,7 @@ CREATE TABLE IF NOT EXISTS jobs (
     raw_json TEXT,
     dedup_hash TEXT,
     full_description TEXT,
+    formatted_description TEXT,
     dup_group_id INTEGER REFERENCES job_duplicate_groups(id),
     is_representative INTEGER NOT NULL DEFAULT 0
 );
@@ -298,6 +299,11 @@ def init_db(db_path: str | Path) -> None:
             conn.execute(
                 "ALTER TABLE jobs ADD COLUMN is_representative INTEGER NOT NULL DEFAULT 0"
             )
+        # Migration: add formatted_description column to jobs for existing databases.
+        # Re-query PRAGMA table_info to avoid stale jobs_cols set after prior ALTER TABLE calls.
+        jobs_cols_v2 = {row[1] for row in conn.execute("PRAGMA table_info(jobs)")}
+        if "formatted_description" not in jobs_cols_v2:
+            conn.execute("ALTER TABLE jobs ADD COLUMN formatted_description TEXT")
         conn.commit()
     finally:
         conn.close()

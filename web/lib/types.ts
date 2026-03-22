@@ -26,6 +26,8 @@ export interface Job {
   ats_platform: string | null; // 'greenhouse' | 'lever' | 'workday' | 'ashby' | null
   raw_json: string | null;
   dedup_hash: string | null;
+  full_description: string | null;
+  formatted_description: string | null;
 }
 
 export interface Company {
