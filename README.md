@@ -126,7 +126,7 @@ graph LR
 
 ```bash
 # 1. Clone the repo
-git clone https://github.com/c0rrey/jobseeker-v2.git jseeker
+git clone https://github.com/c0rrey/jobseeker.git jseeker
 cd jseeker
 
 # 2. Set up credentials
