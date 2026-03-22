@@ -62,7 +62,8 @@ _MAX_BACKOFF: float = 8.0
 #: without needing to patch the ``_SOURCES`` list itself.
 _SOURCES: list[tuple[str, object, float]] = [
     ("glassdoor", _glassdoor_mod, _RATE_LIMIT_GLASSDOOR),
-    ("levelsfy", _levelsfy_mod, _RATE_LIMIT_LEVELSFY),
+    # levels.fyi disabled — /api/company endpoint returns 404 as of 2026-03.
+    # ("levelsfy", _levelsfy_mod, _RATE_LIMIT_LEVELSFY),
 ]
 
 
