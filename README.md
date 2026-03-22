@@ -1,23 +1,20 @@
 # jseeker
 
-> An end-to-end job search pipeline I built to solve my own job search — and to demonstrate applied AI engineering.
+> An end-to-end job search pipeline that eliminates noise through deterministic pre-filtering and two-pass LLM scoring — built to demonstrate applied AI engineering at production scale.
 
 ![Python 3.10+](https://img.shields.io/badge/Python-3.10%2B-blue)
 ![Tests 700+](https://img.shields.io/badge/Tests-700%2B-brightgreen)
-![Next.js](https://img.shields.io/badge/Next.js-15-black)
-
-I got tired of manually sifting through hundreds of job postings that clearly weren't a fit. So I built a pipeline that fetches from five sources, deduplicates, pre-filters with deterministic rules, then runs a two-pass LLM scorer against my profile — surfacing only the roles worth reading. The Next.js dashboard makes it easy to review, compare, and track.
+![Next.js 16](https://img.shields.io/badge/Next.js-16-black)
 
 ---
 
 ## What It Does
 
-- **Fetches** listings from Adzuna, RemoteOK, LinkedIn (RapidAPI), ATS feeds (Greenhouse, Lever, Ashby), and career page crawlers
-- **Deduplicates** across sources using normalized title + company fingerprinting
-- **Pre-filters** with deterministic rules (location, red flags, staleness)
-- **Scores** with a two-pass LLM pipeline: Pass 1 fast-filters at scale; Pass 2 scores survivors across 5 weighted dimensions
-- **Enriches** company data from Glassdoor, Levels.fyi, and StackShare
-- **Presents** everything in a Next.js dashboard with scoring breakdowns, comp comparisons, and profile evolution suggestions
+The core problem with job searching at scale is signal-to-noise ratio. Fetching from five sources produces hundreds of postings per run; the overwhelming majority are misaligned on title, seniority, location, or compensation. Manually reviewing all of them is impractical.
+
+jseeker solves this with a deterministic pre-filter stage that eliminates obvious non-fits cheaply — wrong location, red-flag keywords, stale postings — before any LLM is invoked. The surviving candidates go through a two-pass scoring pipeline: Pass 1 uses a lightweight prompt to fast-filter at scale; only Pass 1 survivors receive the expensive deep-analysis prompt in Pass 2, where each posting is scored across five weighted dimensions against a YAML profile. The result is a short, ranked list of roles worth actually reading, surfaced through a Next.js dashboard with scoring breakdowns, compensation comparisons, and profile evolution suggestions.
+
+The pipeline also tracks how job requirements shift across runs and generates targeted suggestions for improving the candidate profile. The profile YAML is the single source of truth for preferences, salary thresholds, and seniority targeting — no magic constants scattered through the code.
 
 ---
 
@@ -51,7 +48,11 @@ graph LR
         D1[Next.js UI]
     end
 
-    Sources --> B1
+    A1 --> B1
+    A2 --> B1
+    A3 --> B1
+    A4 --> B1
+    A5 --> B1
     B1 --> B2
     B2 --> B3
     B3 --> B4
@@ -116,7 +117,7 @@ graph LR
 | Database | SQLite (WAL mode) |
 | Job sources | Adzuna, RemoteOK, LinkedIn (RapidAPI), ATS feeds, career page crawlers |
 | Enrichment sources | Glassdoor (RapidAPI), Levels.fyi, StackShare |
-| Dashboard | Next.js 15, TypeScript, Tailwind CSS |
+| Dashboard | Next.js 16, TypeScript, Tailwind CSS |
 | Testing | pytest (700+ tests) |
 | Task runner | GNU Make |
 
@@ -129,10 +130,8 @@ graph LR
 git clone https://github.com/c0rrey/jobseeker.git jseeker
 cd jseeker
 
-# 2. Create and activate a Python virtual environment (recommended)
-python3 -m venv .venv
-source .venv/bin/activate
-# Or: make venv && source .venv/bin/activate
+# 2. Create and activate a Python virtual environment
+python3 -m venv .venv && source .venv/bin/activate
 
 # 3. Set up credentials
 cp .env.example .env
@@ -143,12 +142,10 @@ cp pipeline/config/profile.yaml.example pipeline/config/profile.yaml
 # Edit profile.yaml: title keywords, skills, salary targets, location preferences
 
 # 5. Install dependencies and initialise the database
-make setup
-make db-reset
+make setup && make db-reset
 
 # 6. Run the pipeline
 make all         # fetch → deduplicate → pre-filter → enrich
-# Scoring runs via Claude Code subagents (see pipeline/prompts/)
 
 # 7. Launch the dashboard
 make web         # http://localhost:3000
@@ -161,22 +158,6 @@ $ make test
 ...
 716 passed in 12.43s
 ```
-
----
-
-## Makefile Targets
-
-| Target | Description |
-|---|---|
-| `make venv` | Create a `.venv/` Python virtual environment in the project root |
-| `make setup` | Install Python dependencies (`pip install`) and Node dependencies (`npm install`) |
-| `make db-reset` | Delete and recreate the SQLite database with the V2 schema |
-| `make fetch` | Run all API fetchers, ATS feeds, and career page crawlers |
-| `make prefilter` | Run the deterministic pre-filter on unfiltered jobs |
-| `make enrich` | Run the enrichment orchestrator on companies needing enrichment |
-| `make all` | Run fetch, prefilter, and enrich in sequence |
-| `make web` | Start the Next.js dev server at http://localhost:3000 |
-| `make test` | Run the Python test suite via pytest |
 
 ---
 
@@ -215,11 +196,11 @@ jseeker/
 
 ## Screenshots
 
-<!-- Dashboard overview screenshot -->
+<!-- Dashboard overview: ranked job list with composite scores and source badges -->
 <!-- ![Dashboard overview](docs/screenshots/dashboard-overview.png) -->
 
-<!-- Job detail view screenshot -->
+<!-- Job detail view: scoring breakdown across 5 dimensions with LLM reasoning -->
 <!-- ![Job detail view](docs/screenshots/job-detail.png) -->
 
-<!-- Profile evolution page screenshot -->
-<!-- ![Profile page](docs/screenshots/profile.png) -->
+<!-- Profile evolution page: skill gap analysis and improvement suggestions -->
+<!-- ![Profile evolution](docs/screenshots/profile-evolution.png) -->
