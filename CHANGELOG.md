@@ -4,7 +4,7 @@
 
 ### Summary
 
-Six tasks completed across a two-wave implementation run and a two-round review cycle. Wave 1 added the `formatted_description` column to the SQLite jobs schema (DDL + idempotent migration) and the TypeScript `Job` interface. Wave 2 implemented the description formatter module (`pipeline/src/description_formatter.py`) with an injectable LLM callable, a Jinja-style prompt file, and 28 hermetic tests, while a parallel agent wired markdown rendering into the webapp detail page using `react-markdown`, `rehype-sanitize`, and `@tailwindcss/typography`. Round 1 review found 1 P1, 2 P2, and 4 P3 issues across 10 raw findings (7 root causes); all three auto-fixable items landed in the same session. Round 2 returned a clean PASS. Four P3s deferred as seek-175–seek-178. 6 commits total.
+Six tasks completed across a two-wave implementation run and a two-round review cycle. Wave 1 added the `formatted_description` column to the SQLite jobs schema (DDL + idempotent migration) and the TypeScript `Job` interface. Wave 2 implemented the description formatter module (`pipeline/src/description_formatter.py`) with an injectable LLM callable, a Jinja-style prompt file, and 28 hermetic tests, while a parallel agent wired markdown rendering into the webapp detail page using `react-markdown`, `rehype-sanitize`, and `@tailwindcss/typography`. Round 1 review found 1 P1, 2 P2, and 4 P3 issues across 10 raw findings (7 root causes); all three auto-fixable items landed in the same session. Round 2 returned a clean PASS. Four P3s deferred as seek-175–seek-178. 7 commits total.
 
 ### Implementation (Waves 1–2)
 
