@@ -19,7 +19,7 @@ import type {
 } from "@/lib/types";
 
 // ---------------------------------------------------------------------------
-// Dashboard queries (seek-18)
+// Dashboard queries
 // ---------------------------------------------------------------------------
 
 export interface DashboardStats {
@@ -119,7 +119,7 @@ export function getTopMatches(limit = 5): TopMatch[] {
 }
 
 // ---------------------------------------------------------------------------
-// Jobs list queries (seek-19)
+// Jobs list queries
 // ---------------------------------------------------------------------------
 
 export interface JobRow {
@@ -345,7 +345,7 @@ export function getCompanyNames(): string[] {
 }
 
 // ---------------------------------------------------------------------------
-// Job detail queries (seek-20)
+// Job detail queries
 // ---------------------------------------------------------------------------
 
 /**
@@ -399,7 +399,7 @@ export function getLatestFeedbackForJob(jobId: number): Feedback | null {
 }
 
 // ---------------------------------------------------------------------------
-// Company queries (seek-21)
+// Company queries
 // ---------------------------------------------------------------------------
 
 export interface CompanyRow {
@@ -457,7 +457,7 @@ export function getCompanyList(): CompanyRow[] {
 }
 
 // ---------------------------------------------------------------------------
-// Profile / suggestion queries (seek-22)
+// Profile / suggestion queries
 // ---------------------------------------------------------------------------
 
 /**
@@ -491,7 +491,7 @@ export function getProfileSuggestions(): ProfileSuggestion[] {
 }
 
 // ---------------------------------------------------------------------------
-// Feedback history queries (seek-23)
+// Feedback history queries
 // ---------------------------------------------------------------------------
 
 export interface FeedbackRow {

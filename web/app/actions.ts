@@ -3,9 +3,9 @@
 /**
  * Server actions for jseeker web dashboard.
  *
- * seek-20: Feedback actions (submitFeedback)
- * seek-21: Company CRUD actions (addCompany, updateCompanyCareerUrl, toggleCompanyTarget)
- * seek-22: Profile suggestion actions (approveSuggestion, rejectSuggestion)
+ * Feedback actions (submitFeedback)
+ * Company CRUD actions (addCompany, updateCompanyCareerUrl, toggleCompanyTarget)
+ * Profile suggestion actions (approveSuggestion, rejectSuggestion)
  *
  * All actions use better-sqlite3 synchronous writes and call revalidatePath
  * to invalidate the Next.js cache so the UI reflects the latest data.
@@ -15,7 +15,7 @@ import { revalidatePath } from "next/cache";
 import { getDb } from "@/lib/db";
 
 // ---------------------------------------------------------------------------
-// seek-20: Feedback actions
+// Feedback actions
 // ---------------------------------------------------------------------------
 
 /**
@@ -42,7 +42,7 @@ export async function submitFeedback(formData: FormData): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------
-// seek-21: Company CRUD actions
+// Company CRUD actions
 // ---------------------------------------------------------------------------
 
 /**
@@ -107,7 +107,7 @@ export async function toggleCompanyTarget(formData: FormData): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------
-// seek-22: Profile suggestion actions
+// Profile suggestion actions
 // ---------------------------------------------------------------------------
 
 /**
