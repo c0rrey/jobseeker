@@ -47,7 +47,7 @@ salary_target: 150000  # soft preference threshold — compensation signals belo
 salary_min: 140000     # hard floor — roles that explicitly list compensation below this are rejected outright regardless of other factors
 
 # Maximum job age (days) - filter out postings older than this
-max_job_age_days: 90
+max_job_age_days: 60
 
 # Seniority levels you're targeting
 seniority:

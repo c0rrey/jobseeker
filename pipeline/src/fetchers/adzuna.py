@@ -189,6 +189,8 @@ class AdzunaFetcher(BaseFetcher):
             response.raise_for_status()
             
             data = response.json()
+            if not isinstance(data, dict):
+                return []
             return data.get("results", [])
             
         except requests.exceptions.HTTPError as e:
