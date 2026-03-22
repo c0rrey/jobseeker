@@ -1,0 +1,72 @@
+# Your job search profile — edit this to match what you're looking for.
+# Used by the matcher to score and rank job postings.
+#
+# Copy this file to profile.yaml and fill in your own values:
+#   cp pipeline/config/profile.yaml.example pipeline/config/profile.yaml
+
+# Keywords to look for in job titles
+title_keywords:
+  - data engineer
+  - analytics engineer
+  - analytics
+  - applied ai
+  - agentic
+
+# Skills you have / want to use
+skills:
+  - SQL (Presto, Spark, PostgreSQL)
+  - Python (Pandas, NumPy)
+  - dbt
+  - Dimensional modeling
+  - Semantic layers
+  - Analytics marts
+  - Data quality & observability
+  - Metric governance
+  - KPI frameworks
+  - Product measurement
+  - Funnel & cohort analysis
+  - Git
+  - Airflow
+  - Workflow orchestration
+  - Claude
+  - LLM
+  - Generative AI
+
+# Industries or company types to avoid
+avoid_industries:
+  - adult content
+
+# Location preference: remote | hybrid | onsite (or a list of these)
+location_preference: remote
+
+# Preferred locations (for LLM scoring - not hard filters)
+# Jobs in these areas will score higher, but all matching remote jobs are included
+preferred_locations:
+  - Austin, TX
+  - Denver, CO
+  - Remote
+
+salary_target: 150000  # soft preference threshold — compensation signals below this are a soft negative; role may still pass on other merits
+salary_min: 140000     # hard floor — roles that explicitly list compensation below this are rejected outright regardless of other factors
+
+# Maximum job age (days) - filter out postings older than this
+max_job_age_days: 90
+
+# Seniority levels you're targeting
+seniority:
+  - senior
+  - staff
+
+# Optional: Free-form text for LLM-based matching
+# The matcher uses this to understand nuance beyond keyword overlap
+freeform_preferences: |
+  10+ years experience in product analytics and decision systems.
+  Former Senior Data Engineer at a large tech company who owned product measurement and executive reporting for large-scale consumer products.
+  Strong preference for roles partnering closely with product and engineering teams to define metrics strategy and build measurement frameworks.
+  Expertise in analytics engineering: dimensional modeling, semantic layers, dbt-style workflows, and data quality.
+  Interested in product-focused companies where analytics drives strategic decisions.
+  Experience with executive storytelling and stakeholder decision support.
+  Prefer roles with meaningful impact on product strategy and roadmap prioritization.
+  Prefer product companies over agencies.
+  Interested in AI/ML tooling.
+  Built AI orchestration and memory frameworks.
