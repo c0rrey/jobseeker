@@ -975,3 +975,177 @@ class TestCallLlm:
         with patch("anthropic.Anthropic") as mock_client_cls:
             mock_client_cls.return_value.messages.create.return_value = message
             assert _call_llm("prompt") == "direct"
+
+
+# ---------------------------------------------------------------------------
+# discover_company code-path integration tests
+# ---------------------------------------------------------------------------
+
+
+class TestDiscoverCompanyCodePaths:
+    """Targeted integration tests for the three branching paths in discover_company().
+
+    Path A — New company, no career_url supplied (full Glassdoor + probe).
+    Path B — New company, career_url supplied (Glassdoor metadata only, skip probe).
+    Path C — Existing company, career_url supplied (skip API, re-run HTML/LLM).
+    """
+
+    def test_new_company_happy_path_creates_row_and_returns_record(
+        self, conn: sqlite3.Connection, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Path A: New company with no career_url triggers Glassdoor + probe and
+        persists a company row.  Returns CompanyRecord with company_id set."""
+        monkeypatch.setenv("RAPIDAPI_KEY", "test-key-path-a")
+        glassdoor_data = {
+            "name": "NewCo Inc",
+            "website": "https://newco.io",
+            "rating": 4.3,
+            "review_count": 50,
+            "company_link": "https://glassdoor.com/overview/newco",
+            "industry": "Technology",
+            "size": "51-200",
+        }
+
+        with patch(
+            "pipeline.src.company_discovery._fetch_glassdoor_data",
+            return_value=glassdoor_data,
+        ), patch(
+            "pipeline.src.enrichment.glassdoor_rapidapi._load_cache",
+            return_value={},
+        ), patch(
+            "pipeline.src.company_discovery._probe_career_url",
+            return_value="https://newco.io/careers",
+        ):
+            result = discover_company(
+                company_name="NewCo Inc",
+                db_connection=conn,
+                # no career_url — Path A
+            )
+
+        from pipeline.src.company_discovery import CompanyRecord
+
+        assert isinstance(result, CompanyRecord)
+        assert result.company_id is not None
+        assert isinstance(result.company_id, int)
+        assert result.career_page_url == "https://newco.io/careers"
+
+        # Verify the company row was persisted with Glassdoor metadata
+        row = conn.execute(
+            "SELECT name, glassdoor_rating, industry, size_range "
+            "FROM companies WHERE name = 'NewCo Inc'"
+        ).fetchone()
+        assert row is not None
+        assert row["glassdoor_rating"] == 4.3
+        assert row["industry"] == "Technology"
+        assert row["size_range"] == "51-200"
+
+    def test_new_company_with_career_url_supplied_uses_url_directly(
+        self, conn: sqlite3.Connection, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Path B: New company with career_url supplied — Glassdoor is fetched for
+        metadata, but the supplied URL is used without probing.  Company row is
+        created and career_page_url reflects the supplied URL."""
+        monkeypatch.setenv("RAPIDAPI_KEY", "test-key-path-b")
+        glassdoor_data = {
+            "name": "UrlCo Ltd",
+            "website": "https://urlco.com",
+            "rating": 3.7,
+        }
+
+        with patch(
+            "pipeline.src.company_discovery._fetch_glassdoor_data",
+            return_value=glassdoor_data,
+        ), patch(
+            "pipeline.src.enrichment.glassdoor_rapidapi._load_cache",
+            return_value={},
+        ), patch(
+            "pipeline.src.company_discovery._probe_career_url",
+        ) as mock_probe:
+            result = discover_company(
+                company_name="UrlCo Ltd",
+                db_connection=conn,
+                career_url="https://urlco.com/jobs",  # supplied — Path B
+            )
+
+        # _probe_career_url must NOT be called because career_url was supplied
+        mock_probe.assert_not_called()
+
+        from pipeline.src.company_discovery import CompanyRecord
+
+        assert isinstance(result, CompanyRecord)
+        assert result.career_page_url == "https://urlco.com/jobs"
+
+        # Company row created
+        row = conn.execute(
+            "SELECT name FROM companies WHERE name = 'UrlCo Ltd'"
+        ).fetchone()
+        assert row is not None
+
+    def test_existing_company_with_career_url_reruns_html_llm_phases(
+        self, conn: sqlite3.Connection, seeded_company: int
+    ) -> None:
+        """Path C (re-discovery): Existing company with career_url supplied — skips
+        Glassdoor API, re-runs HTML fetch and LLM analysis.  Returns CompanyRecord
+        with the supplied URL and the existing company_id."""
+        mock_response = MagicMock()
+        mock_response.text = GREENHOUSE_HTML
+        mock_response.raise_for_status = MagicMock()
+
+        with patch(
+            "pipeline.src.company_discovery.requests.get",
+            return_value=mock_response,
+        ), patch(
+            "pipeline.src.company_discovery._call_llm",
+            return_value=json.dumps(ATS_LLM_RESPONSE),
+        ), patch(
+            "pipeline.src.company_discovery._fetch_glassdoor_data",
+        ) as mock_glassdoor:
+            result = discover_company(
+                company_name="Acme Corp",   # already in DB via seeded_company
+                db_connection=conn,
+                career_url="https://acme.com/careers",  # re-discovery URL
+            )
+
+        # Glassdoor must NOT be called for an existing company
+        mock_glassdoor.assert_not_called()
+
+        from pipeline.src.company_discovery import CompanyRecord
+
+        assert isinstance(result, CompanyRecord)
+        assert result.company_id == seeded_company
+        assert result.career_page_url == "https://acme.com/careers"
+
+    def test_existing_company_without_career_url_returns_cached_record(
+        self, conn: sqlite3.Connection
+    ) -> None:
+        """Existing company with no career_url — returns immediately with the stored
+        career_page_url without any API or HTTP calls."""
+        # Seed a company that already has a career URL stored
+        conn.execute(
+            "INSERT INTO companies (name, career_page_url) VALUES (?, ?)",
+            ("Cached Co", "https://cached.co/careers"),
+        )
+        conn.commit()
+        cached_id = conn.execute(
+            "SELECT id FROM companies WHERE name = 'Cached Co'"
+        ).fetchone()["id"]
+
+        with patch(
+            "pipeline.src.company_discovery._fetch_glassdoor_data",
+        ) as mock_glassdoor, patch(
+            "pipeline.src.company_discovery.requests.get",
+        ) as mock_http:
+            result = discover_company(
+                company_name="Cached Co",
+                db_connection=conn,
+                # no career_url — should return cached record immediately
+            )
+
+        mock_glassdoor.assert_not_called()
+        mock_http.assert_not_called()
+
+        from pipeline.src.company_discovery import CompanyRecord
+
+        assert isinstance(result, CompanyRecord)
+        assert result.company_id == cached_id
+        assert result.career_page_url == "https://cached.co/careers"
