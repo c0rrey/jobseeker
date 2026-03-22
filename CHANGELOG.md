@@ -1,5 +1,30 @@
 # Changelog
 
+## 2026-03-21 — Session 191107 (fetch-descriptions CLI integration and fix cycle)
+
+### Summary
+
+Four tasks completed across a two-wave implementation run and a two-round review cycle. Wave 1 refactored `fetch_descriptions.run()` to return a summary dict instead of an int exit code, aligning it with the established stage-handler contract used throughout `cli.py`. Wave 2 wired the updated callable into the CLI as `--fetch-descriptions` with full mutual-exclusion enforcement, a non-fatal `--all` integration, and 18 new tests (71 total in test_cli.py). Review round 1 found 0 P1s, 2 P2s, and 4 P3s across 4 specialisms; both P2s were auto-fixed in the same session. Review round 2 returned a clean PASS with no new findings. Three commits land in the range after the seek-161 baseline.
+
+### Implementation (Waves 1–2)
+
+- **seek-161**: refactor: return summary dict from fetch_descriptions.run() instead of int exit code — `run()` now returns `dict[str, int]`; fatal paths raise `RuntimeError`; 12 new tests in `pipeline/tests/test_fetch_descriptions.py` (`7bc5056`)
+- **seek-162**: feat: add --fetch-descriptions CLI flag handler and --all integration — `run_fetch_descriptions()`, `_print_fetch_descriptions_summary()`, `--fetch-descriptions` flag, non-fatal `--all` wiring, 18 new tests in `pipeline/tests/test_cli.py` (`a8d7ecc`)
+
+### Review Fixes (Round 1)
+
+- **seek-167**: fix: remove dead _make_all_patches helper from TestAllStageFetchDescriptions — deleted never-called helper and misleading docstring from `pipeline/tests/test_cli.py` (`9423c9d`)
+- **seek-168**: fix: wrap fetch_full_description in try/except to prevent batch abort on HTTP errors — added `try/except Exception` around HTTP fetch in batch loop in `pipeline/scripts/fetch_descriptions.py` (`a4bcd8f`)
+
+### Review Statistics
+
+| Round | Scope | P1 | P2 | P3 | Verdict |
+|-------|-------|----|----|-----|---------|
+| 1 | 4 files, 2 tasks | 0 | 2 | 4 | PASS WITH ISSUES |
+| 2 | fix commits only | 0 | 0 | 0 | PASS |
+
+6 root causes consolidated in round 1. Both P2s auto-fixed; 4×P3 deferred as seek-166, seek-169, seek-170, seek-171.
+
 ## 2026-03-21 — Session 20260321-164550 (Scorer File-Based Output + Code Quality Fixes + 2-Round Review)
 
 ### Summary
