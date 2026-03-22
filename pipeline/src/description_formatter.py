@@ -129,6 +129,8 @@ def _default_llm_callable(prompt: str) -> str:
         max_tokens=8192,
         messages=[{"role": "user", "content": prompt}],
     )
+    if not message.content:
+        raise ValueError("Anthropic API returned empty content for formatting request")
     return message.content[0].text
 
 
