@@ -13,6 +13,8 @@ export const dynamic = "force-dynamic";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ExternalLink, ChevronDown } from "lucide-react";
+import ReactMarkdown from "react-markdown";
+import rehypeSanitize from "rehype-sanitize";
 import {
   Card,
   CardContent,
@@ -260,14 +262,16 @@ export default async function JobDetailPage({
           )}
 
           {/* Job description */}
-          {(job.full_description || job.description) && (
+          {(job.formatted_description || job.full_description || job.description) && (
             <Card>
               <CardHeader>
                 <CardTitle>Job Description</CardTitle>
               </CardHeader>
               <CardContent>
-                <div className="prose prose-sm max-w-none text-sm leading-relaxed whitespace-pre-wrap text-muted-foreground">
-                  {job.full_description || job.description}
+                <div className="prose prose-sm max-w-none text-muted-foreground">
+                  <ReactMarkdown rehypePlugins={[rehypeSanitize]}>
+                    {job.formatted_description ?? job.full_description ?? job.description ?? ""}
+                  </ReactMarkdown>
                 </div>
               </CardContent>
             </Card>
