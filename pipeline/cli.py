@@ -1,13 +1,15 @@
 """
 CLI entry point for the jseeker V2 pipeline.
 
-Provides six mutually exclusive stage flags:
+Provides seven mutually exclusive stage flags:
 
   --fetch               Run all API fetchers (Adzuna, RemoteOK, LinkedIn), ATS
                         feed fetcher, and career page crawler, then deduplicate
                         and insert into the database.
   --fetch-descriptions  Fetch full job descriptions for Pass 1 survivors that
                         have a NULL full_description.
+  --format-descriptions Format job descriptions for Pass 2 survivors with NULL
+                        formatted_description using an LLM.
   --enrich              Run the enrichment orchestrator on companies needing
                         enrichment.
   --prefilter           Run the deterministic pre-filter on unfiltered jobs.
@@ -28,6 +30,7 @@ Usage::
     python pipeline/cli.py --help
     python pipeline/cli.py --fetch
     python pipeline/cli.py --fetch-descriptions
+    python pipeline/cli.py --format-descriptions
     python pipeline/cli.py --enrich
     python pipeline/cli.py --prefilter
     python pipeline/cli.py --discover
@@ -43,6 +46,7 @@ from typing import Any
 
 from pipeline.config.settings import get_db_path
 from pipeline.scripts.fetch_descriptions import run as _fetch_descriptions_run
+from pipeline.scripts.format_descriptions import run as _format_descriptions_run
 from pipeline.scripts.discover_companies import (
     _get_existing_survivor_company_count,
     _get_new_survivor_companies,
@@ -253,6 +257,27 @@ def run_fetch_descriptions(db_path: str) -> dict[str, int]:
     return _fetch_descriptions_run(db_path)
 
 
+def run_format_descriptions(db_path: str) -> dict[str, int]:
+    """Format job descriptions for Pass 2 survivors with NULL formatted_description.
+
+    Delegates to :func:`pipeline.scripts.format_descriptions.run`, which
+    queries the database for eligible jobs and sends each to an LLM for
+    markdown formatting.
+
+    Args:
+        db_path: Filesystem path of the SQLite database.
+
+    Returns:
+        A dict with keys ``"examined"``, ``"formatted"``, and ``"skipped"``
+        (all ``int``).  All three are 0 when no eligible jobs exist.
+
+    Raises:
+        FileNotFoundError: If *db_path* does not exist.
+        sqlite3.Error: If a database operation fails unexpectedly.
+    """
+    return _format_descriptions_run(db_path)
+
+
 def run_discover(db_path: str) -> dict[str, Any]:
     """Auto-discover companies from Pass 1 survivors and enrich them.
 
@@ -388,6 +413,22 @@ def _print_fetch_descriptions_summary(summary: dict[str, int]) -> None:
     )
 
 
+def _print_format_descriptions_summary(summary: dict[str, int]) -> None:
+    """Print a human-readable format-descriptions stage summary to stdout."""
+    examined = summary.get("examined", 0)
+    if examined == 0:
+        print("Nothing to format.")
+        return
+    formatted = summary.get("formatted", 0)
+    skipped = summary.get("skipped", 0)
+    print(
+        f"Format-descriptions complete. "
+        f"Examined: {examined}, "
+        f"formatted: {formatted}, "
+        f"skipped: {skipped}."
+    )
+
+
 def _print_discover_summary(summary: dict[str, Any]) -> None:
     """Print a human-readable discovery stage summary to stdout."""
     new_discovered = summary.get("new_discovered", 0)
@@ -441,6 +482,7 @@ def _build_parser() -> argparse.ArgumentParser:
             "Examples:\n"
             "  python pipeline/cli.py --fetch\n"
             "  python pipeline/cli.py --fetch-descriptions\n"
+            "  python pipeline/cli.py --format-descriptions\n"
             "  python pipeline/cli.py --enrich\n"
             "  python pipeline/cli.py --prefilter\n"
             "  python pipeline/cli.py --discover\n"
@@ -475,6 +517,15 @@ def _build_parser() -> argparse.ArgumentParser:
         "--prefilter",
         action="store_true",
         help="Run the deterministic pre-filter on unfiltered jobs.",
+    )
+    group.add_argument(
+        "--format-descriptions",
+        action="store_true",
+        dest="format_descriptions",
+        help=(
+            "Format job descriptions for Pass 2 survivors with NULL "
+            "formatted_description. Prints examined/formatted/skipped counts."
+        ),
     )
     group.add_argument(
         "--discover",
@@ -527,7 +578,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     # No stage selected — print help and exit cleanly.
-    if not any([args.fetch, args.fetch_descriptions, args.enrich, args.prefilter, args.discover, args.all]):
+    if not any([args.fetch, args.fetch_descriptions, args.format_descriptions, args.enrich, args.prefilter, args.discover, args.all]):
         parser.print_help()
         return 0
 
@@ -545,6 +596,10 @@ def main(argv: list[str] | None = None) -> int:
         elif args.fetch_descriptions:
             summary = run_fetch_descriptions(db_path)
             _print_fetch_descriptions_summary(summary)
+
+        elif args.format_descriptions:
+            summary = run_format_descriptions(db_path)
+            _print_format_descriptions_summary(summary)
 
         elif args.enrich:
             summary = run_enrich(db_path)
