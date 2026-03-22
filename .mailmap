@@ -1,0 +1,27 @@
+# .mailmap — git identity mapping used for history rewrite (seek-181)
+#
+# Purpose: sanitize author/committer email from personal address to GitHub noreply
+#          before pushing to public repository.
+#
+# Rewrite commands used (run from repo root):
+#
+#   pip3 install git-filter-repo
+#
+#   # Remove PDFs from history AND rewrite emails in one pass:
+#   git filter-repo \
+#     --path-glob 'pipeline/resume/*.pdf' \
+#     --invert-paths \
+#     --mailmap .mailmap \
+#     --force
+#
+#   # Re-add remote after filter-repo removes it:
+#   git remote add origin https://github.com/c0rrey/jobseeker-v2.git
+#
+# Verification checks:
+#   git log --all --diff-filter=A --name-only --format='' | grep -i '\.pdf'   # should be empty
+#   git log --format='%ae' | sort -u                                           # should show only noreply
+#   git log --format='%an' | sort -u                                           # should include 'ctc'
+#   git rev-list --count HEAD                                                  # should match pre-rewrite count
+#
+# Identity mapping format: New Name <new-email> Old Name <old-email>
+ctc <c0rrey@users.noreply.github.com> ctc <correycc@gmail.com>
