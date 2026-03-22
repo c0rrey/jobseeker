@@ -262,7 +262,7 @@ def init_db(db_path: str | Path) -> None:
 
     Args:
         db_path: Filesystem path for the SQLite database file.
-            Parent directories must already exist.
+            Parent directories are created automatically if they do not exist.
 
     Raises:
         sqlite3.Error: If any DDL statement fails.
