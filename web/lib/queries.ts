@@ -293,6 +293,9 @@ export function getJobList(filters: JobListFilters = {}): JobRow[] {
   conditions.unshift("sd0.job_id IS NULL");
   conditions.unshift("sd1_fail.job_id IS NULL");
 
+  // Hide non-representative duplicates (show only reps + ungrouped jobs)
+  conditions.unshift("(j.is_representative = 1 OR j.dup_group_id IS NULL)");
+
   const sql = `
     SELECT
       j.id,
