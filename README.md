@@ -125,17 +125,21 @@ graph LR
 
 ## Getting Started
 
+**Prerequisites**: Python 3.10+, Node.js 18+, and GNU Make.
+
 ```bash
 # 1. Clone the repo
 git clone https://github.com/c0rrey/jobseeker.git jseeker
 cd jseeker
 
-# 2. Create and activate a Python virtual environment
+# 2. Create and activate a Python virtual environment (recommended)
 python3 -m venv .venv && source .venv/bin/activate
+# make setup works without a venv (installs globally), but a venv is strongly recommended.
 
 # 3. Set up credentials
 cp .env.example .env
 # Edit .env with your API keys (Anthropic, Adzuna, RapidAPI, etc.)
+# Note: .env.example is not yet committed. Create .env manually or ask the repo owner for the template.
 
 # 4. Set up your search profile
 cp pipeline/config/profile.yaml.example pipeline/config/profile.yaml
@@ -155,9 +159,32 @@ Run the test suite:
 
 ```
 $ make test
-...
-716 passed in 12.43s
 ```
+
+### Makefile Targets
+
+| Target | Description |
+|---|---|
+| `make venv` | Create a Python virtual environment at `.venv/` (activate with `source .venv/bin/activate`) |
+| `make setup` | Install Python dependencies (`pip install`) and Node dependencies (`npm install`) |
+| `make fetch` | Run all API fetchers, ATS feeds, and career page crawler |
+| `make enrich` | Run the enrichment orchestrator on companies needing enrichment |
+| `make prefilter` | Run the deterministic pre-filter on unfiltered jobs |
+| `make all` | Run fetch, prefilter, and enrich in sequence |
+| `make web` | Start the Next.js dev server at http://localhost:3000 |
+| `make db-reset` | Delete and recreate the database with the current schema |
+| `make test` | Run the Python test suite with pytest |
+
+### Troubleshooting
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| `make setup` installs to system Python | No venv active | Run `python3 -m venv .venv && source .venv/bin/activate` before `make setup` |
+| `make fetch` raises `ValueError` for Adzuna | Missing `ADZUNA_APP_ID` / `ADZUNA_API_KEY` in `.env` | Add valid Adzuna credentials to `.env` |
+| `make fetch` logs a warning for LinkedIn | Missing `RAPIDAPI_KEY` in `.env` | Add a valid RapidAPI key to `.env` (LinkedIn fetcher degrades gracefully) |
+| `make web` throws a database error | `data/jobs.db` does not exist | Run `make db-reset` before `make web` |
+| `make db-reset` fails | Unexpected `sqlite3` error | Check Python path: `python3 -c "from pipeline.src.database import init_db"` |
+| `python3 -m venv` not found | Python 3 not installed or aliased as `python` | Install Python 3.10+ and ensure `python3` is on `PATH`, or override with `PYTHON=python make setup` |
 
 ---
 
@@ -188,7 +215,7 @@ jseeker/
 │   │   └── profile/               # profile evolution view
 │   └── components/                # shared UI components
 ├── data/                          # SQLite database (git-ignored)
-├── .env.example                   # credential template
+├── .env.example                   # credential template (not yet committed — create .env manually)
 └── Makefile                       # task runner
 ```
 
