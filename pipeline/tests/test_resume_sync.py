@@ -6,10 +6,16 @@ Covers:
 - check_resume_changed: returns True when hash differs from stored value
 - check_resume_changed: returns False when hash matches stored value
 - check_resume_changed: returns True when resume_hash column is NULL in latest row
-- extract_resume_text: returns a string path
-- extract_resume_text: written temp file contains the extracted text
-- extract_resume_text: pages that return None are skipped gracefully
-- extract_resume_text: multi-page PDF concatenates with newline separator
+- extract_resume_text (PDF): returns a string path
+- extract_resume_text (PDF): written temp file contains the extracted text
+- extract_resume_text (PDF): pages that return None are skipped gracefully
+- extract_resume_text (PDF): multi-page PDF concatenates with newline separator
+- extract_resume_text (MD): returns a string path
+- extract_resume_text (MD): temp file contains the full markdown content
+- extract_resume_text (MD): temp file ends with .txt suffix
+- extract_resume_text (MD): accepts string path as well as Path
+- extract_resume_text (MD): empty markdown file produces empty temp file
+- extract_resume_text: raises ValueError for unsupported extension
 """
 
 from __future__ import annotations
@@ -21,7 +27,11 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from pipeline.src.resume_sync import check_resume_changed, extract_resume_text
+from pipeline.src.resume_sync import (
+    check_resume_changed,
+    extract_resume_text,
+    _extract_text_from_md,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -61,6 +71,17 @@ def sample_pdf(tmp_path: Path) -> Path:
     pdf_path = tmp_path / "resume.pdf"
     pdf_path.write_bytes(b"%PDF-1.4 fake pdf content for hashing")
     return pdf_path
+
+
+@pytest.fixture()
+def sample_md(tmp_path: Path) -> Path:
+    """Write a minimal markdown resume to a temp file."""
+    md_path = tmp_path / "resume.md"
+    md_path.write_text(
+        "# Alex Morgan\n\n## Summary\n\nExperienced engineer.\n\n## Core Skills\n\nPython, SQL\n",
+        encoding="utf-8",
+    )
+    return md_path
 
 
 # ---------------------------------------------------------------------------
@@ -246,3 +267,85 @@ class TestExtractResumeText:
 
         assert isinstance(tmp_path, str)
         os.unlink(tmp_path)
+
+
+# ---------------------------------------------------------------------------
+# extract_resume_text — markdown (.md) path
+# ---------------------------------------------------------------------------
+
+
+class TestExtractResumeTextMarkdown:
+    def test_returns_string(self, sample_md: Path) -> None:
+        """Return value must be a string (path to temp file)."""
+        result = extract_resume_text(sample_md)
+        assert isinstance(result, str)
+        os.unlink(result)
+
+    def test_temp_file_contains_markdown_content(self, sample_md: Path) -> None:
+        """The returned temp file must contain the full markdown text."""
+        tmp_path = extract_resume_text(sample_md)
+        try:
+            content = Path(tmp_path).read_text(encoding="utf-8")
+            assert "Alex Morgan" in content
+            assert "Core Skills" in content
+        finally:
+            os.unlink(tmp_path)
+
+    def test_temp_file_has_txt_suffix(self, sample_md: Path) -> None:
+        """Temp file should end with .txt regardless of source format."""
+        tmp_path = extract_resume_text(sample_md)
+        try:
+            assert tmp_path.endswith(".txt")
+        finally:
+            os.unlink(tmp_path)
+
+    def test_accepts_string_path(self, sample_md: Path) -> None:
+        """resume_path can be passed as a string for .md files."""
+        tmp_path = extract_resume_text(str(sample_md))
+        assert isinstance(tmp_path, str)
+        os.unlink(tmp_path)
+
+    def test_empty_md_produces_empty_temp_file(self, tmp_path: Path) -> None:
+        """An empty .md file produces an empty temp file."""
+        empty_md = tmp_path / "empty.md"
+        empty_md.write_text("", encoding="utf-8")
+
+        result_path = extract_resume_text(empty_md)
+        try:
+            content = Path(result_path).read_text(encoding="utf-8")
+            assert content == ""
+        finally:
+            os.unlink(result_path)
+
+    def test_does_not_invoke_pdfplumber(self, sample_md: Path) -> None:
+        """pdfplumber.open must NOT be called when reading a .md file."""
+        with patch("pipeline.src.resume_sync.pdfplumber.open") as mock_open:
+            tmp_path = extract_resume_text(sample_md)
+            mock_open.assert_not_called()
+        os.unlink(tmp_path)
+
+    def test_helper_extract_text_from_md(self, sample_md: Path) -> None:
+        """_extract_text_from_md returns the raw file contents as a string."""
+        content = _extract_text_from_md(sample_md)
+        assert "# Alex Morgan" in content
+        assert isinstance(content, str)
+
+    def test_helper_raises_for_missing_file(self, tmp_path: Path) -> None:
+        """_extract_text_from_md raises FileNotFoundError for missing paths."""
+        missing = tmp_path / "nonexistent.md"
+        with pytest.raises(FileNotFoundError):
+            _extract_text_from_md(missing)
+
+
+# ---------------------------------------------------------------------------
+# extract_resume_text — unsupported extension
+# ---------------------------------------------------------------------------
+
+
+class TestExtractResumeTextUnsupported:
+    def test_raises_value_error_for_unknown_extension(self, tmp_path: Path) -> None:
+        """ValueError is raised for file extensions other than .pdf and .md."""
+        docx_file = tmp_path / "resume.docx"
+        docx_file.write_bytes(b"fake docx content")
+        with pytest.raises(ValueError, match="Unsupported resume file extension"):
+            extract_resume_text(docx_file)
