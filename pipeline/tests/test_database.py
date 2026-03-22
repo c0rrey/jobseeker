@@ -2,7 +2,7 @@
 Tests for pipeline/src/database.py.
 
 Covers:
-- Schema creation: all 7 tables exist after init_db()
+- Schema creation: all 9 tables exist after init_db()
 - All required indices exist after init_db()
 - Specific constraints: UNIQUE on jobs.url, UNIQUE(job_id, pass) on
   score_dimensions, CHECK on feedback.signal
@@ -56,7 +56,7 @@ class TestInitDb:
         init_db(path)
         assert path.exists()
 
-    def test_exactly_seven_tables(self, db_path: Path) -> None:
+    def test_creates_all_expected_tables(self, db_path: Path) -> None:
         with sqlite3.connect(str(db_path)) as conn:
             rows = conn.execute(
                 "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%';"
