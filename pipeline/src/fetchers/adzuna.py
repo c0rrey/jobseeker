@@ -149,7 +149,7 @@ class AdzunaFetcher(BaseFetcher):
         
         return all_jobs
 
-    def _fetch_page(self, page: int, what: str, where: str, salary_min: Optional[int] = None) -> list[dict]:
+    def _fetch_page(self, page: int, what: str, where: str, salary_min: Optional[int] = None) -> list[dict[str, Any]]:
         """
         Fetch a single page of results.
         
