@@ -1,5 +1,35 @@
 # Changelog
 
+## 2026-03-22 — Session 20260322-162003 (PII removal, public repo, code quality, README rewrite)
+
+### Summary
+
+Nine tasks completed across four waves. Epic seek-T18 replaced the PDF resume with a PII-free markdown stand-in, created `profile.yaml.example` with a generic persona, rewrote git history (176+ commits, 3 PDF blobs, single author email) using `git filter-repo`, and published a clean public repo at `c0rrey/jobseeker`. Epic seek-T19 fixed lazy logging in `filter.py`, tightened the `adzuna.py` return type, removed task-ID noise from web comments, and added 44 new tests (40 normalizer, 4 `discover_company` code paths — suite grows to 760). Epic seek-T20 rewrote `README.md` with architecture-first Mermaid diagrams, key technical decision callouts, and a developer setup section with `make venv`. Review round 1 found 0 P1, 2 P2, 16 P3 issues; both P2s (adzuna config drift + non-dict API guard) were fixed in the same session. 10 commits total.
+
+### Implementation (Waves 1–4)
+
+- **seek-179**: feat: replace resume PDF with `pipeline/resume/sample_resume.md`; add `.md` dispatch path in `resume_sync.py`; 9 new tests (`b9bb95b`)
+- **seek-180**: feat: create `pipeline/config/profile.yaml.example` with genericized persona; Tampa/Orlando → Austin TX/Denver CO (`cf59a19`)
+- **seek-182**: fix: convert 6 f-string `logger.info` calls in `filter.py` to lazy `%s`; `adzuna.py` return type → `list[dict[str, Any]]` (`27e73af`)
+- **seek-183**: refactor: remove 16 `seek-*` task ID references from `web/app/actions.ts` and `web/lib/queries.ts` (`6e00df9`)
+- **seek-184**: test: add `test_normalizer.py` (40 methods) and 4 `discover_company` path tests; suite → 760 collected (`e151175`)
+- **seek-181**: chore: `git filter-repo` single-pass — remove 3 PDF blobs, rewrite `correycc@gmail.com` → `c0rrey@users.noreply.github.com`; add `.mailmap` (`3a283a1`)
+- **seek-185**: docs: rewrite `README.md` 90 → 205 lines with architecture Mermaid diagram, scoring dimensions diagram, key technical decisions, tech stack table (`e3bfd9e`)
+- **seek-187**: chore: create public repo `c0rrey/jobseeker`; push 177 clean commits to `main`; update README clone URL (`39e625b`)
+- **seek-186**: docs: add venv step to Getting Started, Makefile Targets table, `make venv` target, `.venv/` to `.gitignore` (`79f6d01`)
+
+### Review Fixes (Round 1)
+
+- **RC-1 + RC-2**: fix: align `adzuna.py` `max_days_old` value and comment; add `isinstance(data, dict)` guard on API response (`76a2844`)
+
+### Review Statistics
+
+| Round | Scope | P1 | P2 | P3 | Verdict |
+|-------|-------|----|----|-----|---------|
+| 1 | 9 tasks, 4 waves | 0 | 2 | 16 | PASS WITH ISSUES |
+
+22 raw findings → 18 root causes (3 merges). Both P2s fixed in session. 16 P3s not filed — crumb system unavailable (`.crumbs/tasks.jsonl` destroyed by `git filter-repo`).
+
 ## 2026-03-22 — Session 20260321-201656 (formatted_description pipeline and markdown rendering)
 
 ### Summary
