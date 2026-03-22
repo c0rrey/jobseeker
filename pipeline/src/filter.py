@@ -242,27 +242,27 @@ def filter_jobs(jobs: list[Job]) -> list[Job]:
     
     # Filter 1: Title keywords (must match target roles)
     jobs = [j for j in jobs if matches_title_keywords(j, title_keywords)]
-    logger.info(f"After title keyword filter: {len(jobs)}/{initial_count} jobs")
+    logger.info("After title keyword filter: %s/%s jobs", len(jobs), initial_count)
 
     # Filter 2: Salary minimum
     jobs = [j for j in jobs if meets_salary_requirement(j, min_salary)]
-    logger.info(f"After salary filter (>=${min_salary:,}): {len(jobs)}/{initial_count} jobs")
+    logger.info("After salary filter (>=$%s): %s/%s jobs", f"{min_salary:,}", len(jobs), initial_count)
 
     # Filter 3: Remove intern roles
     jobs = [j for j in jobs if not is_intern_role(j)]
-    logger.info(f"After intern filter: {len(jobs)}/{initial_count} jobs")
+    logger.info("After intern filter: %s/%s jobs", len(jobs), initial_count)
 
     # Filter 4: Remove old postings
     jobs = [j for j in jobs if not is_too_old(j, max_age_days)]
-    logger.info(f"After age filter ({max_age_days} days): {len(jobs)}/{initial_count} jobs")
+    logger.info("After age filter (%s days): %s/%s jobs", max_age_days, len(jobs), initial_count)
 
     # Filter 5: Remove red flags
     jobs = [j for j in jobs if not has_red_flags(j, red_flags)]
-    logger.info(f"After red flag filter: {len(jobs)}/{initial_count} jobs")
+    logger.info("After red flag filter: %s/%s jobs", len(jobs), initial_count)
 
     # Filter 6: Location filtering
     jobs = [j for j in jobs if is_allowed_location(j)]
-    logger.info(f"After location filter: {len(jobs)}/{initial_count} jobs")
+    logger.info("After location filter: %s/%s jobs", len(jobs), initial_count)
 
     return jobs
 

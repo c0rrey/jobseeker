@@ -10,7 +10,7 @@ the normalizer handles the conversion.
 
 import logging
 import time
-from typing import Optional
+from typing import Any, Optional
 
 import requests
 
@@ -60,7 +60,7 @@ class AdzunaFetcher(BaseFetcher):
         self.auto_increase_pages = auto_increase_pages
         self.base_url = f"https://api.adzuna.com/v1/api/jobs/{country}/search"
 
-    def fetch(self) -> list[dict]:
+    def fetch(self) -> list[dict[str, Any]]:
         """
         Fetch jobs from Adzuna API.
         
