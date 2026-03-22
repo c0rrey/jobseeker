@@ -129,23 +129,28 @@ graph LR
 git clone https://github.com/c0rrey/jobseeker.git jseeker
 cd jseeker
 
-# 2. Set up credentials
+# 2. Create and activate a Python virtual environment (recommended)
+python3 -m venv .venv
+source .venv/bin/activate
+# Or: make venv && source .venv/bin/activate
+
+# 3. Set up credentials
 cp .env.example .env
 # Edit .env with your API keys (Anthropic, Adzuna, RapidAPI, etc.)
 
-# 3. Set up your search profile
+# 4. Set up your search profile
 cp pipeline/config/profile.yaml.example pipeline/config/profile.yaml
 # Edit profile.yaml: title keywords, skills, salary targets, location preferences
 
-# 4. Install dependencies and initialise the database
+# 5. Install dependencies and initialise the database
 make setup
 make db-reset
 
-# 5. Run the pipeline
+# 6. Run the pipeline
 make all         # fetch → deduplicate → pre-filter → enrich
 # Scoring runs via Claude Code subagents (see pipeline/prompts/)
 
-# 6. Launch the dashboard
+# 7. Launch the dashboard
 make web         # http://localhost:3000
 ```
 
@@ -156,6 +161,22 @@ $ make test
 ...
 716 passed in 12.43s
 ```
+
+---
+
+## Makefile Targets
+
+| Target | Description |
+|---|---|
+| `make venv` | Create a `.venv/` Python virtual environment in the project root |
+| `make setup` | Install Python dependencies (`pip install`) and Node dependencies (`npm install`) |
+| `make db-reset` | Delete and recreate the SQLite database with the V2 schema |
+| `make fetch` | Run all API fetchers, ATS feeds, and career page crawlers |
+| `make prefilter` | Run the deterministic pre-filter on unfiltered jobs |
+| `make enrich` | Run the enrichment orchestrator on companies needing enrichment |
+| `make all` | Run fetch, prefilter, and enrich in sequence |
+| `make web` | Start the Next.js dev server at http://localhost:3000 |
+| `make test` | Run the Python test suite via pytest |
 
 ---
 

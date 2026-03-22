@@ -1,7 +1,12 @@
 PYTHON  ?= python3
 DB_PATH ?= data/jobs.db
 
-.PHONY: setup fetch enrich prefilter all web db-reset test
+.PHONY: venv setup fetch enrich prefilter all web db-reset test
+
+## Create a Python virtual environment at .venv/ (activate with: source .venv/bin/activate).
+venv:
+	$(PYTHON) -m venv .venv
+	@echo "Virtual environment created. Activate it with: source .venv/bin/activate"
 
 ## Bootstrap the project: install Python + Node dependencies.
 setup:

@@ -11,6 +11,7 @@
 # Python
 __pycache__/
 *.pyc
+.venv/
 
 # Data files
 data/
