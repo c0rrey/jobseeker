@@ -305,8 +305,20 @@ def _persist_groups(
         )
         jobs_grouped += len(sorted_ids)
 
-        # The lowest id is the representative.
-        representative_id = sorted_ids[0]
+        # Pick the best representative: prefer a member with a fetchable
+        # URL (Adzuna details/ over land/ad/ which returns 403), then
+        # fall back to lowest id.
+        rows = conn.execute(
+            f"""SELECT id, url FROM jobs
+                WHERE id IN ({placeholders})
+                ORDER BY id""",
+            sorted_ids,
+        ).fetchall()
+        representative_id = sorted_ids[0]  # default: lowest id
+        for row in rows:
+            if row[1] and "/land/ad/" not in row[1]:
+                representative_id = row[0]
+                break
         conn.execute(
             "UPDATE jobs SET is_representative = 1 WHERE id = ?",
             (representative_id,),

@@ -166,51 +166,62 @@ def has_red_flags(job: Job, red_flags: dict | None = None) -> bool:
 def is_allowed_location(job: Job) -> bool:
     """
     Return True if the job is in an allowed location.
-    
+
     Allowed locations:
     - Remote (anywhere in the US)
     - Any location in Florida (including by county name)
-    
-    The LLM scorer will consider location preference (Tampa/Orlando) as part of the match score.
-    
+    - Seattle metro area / Washington state (King County)
+
+    The LLM scorer will consider location preference (Tampa/Orlando/Seattle) as part of the match score.
+
     Args:
         job: The job to check.
-        
+
     Returns:
         True if location is allowed, False otherwise.
     """
     if not job.location:
         # No location specified - could be remote, so allow it
         return True
-    
+
     location_lower = job.location.lower()
-    
+
     # Check for remote
     remote_keywords = ["remote", "work from home", "wfh", "telecommute", "anywhere"]
     if any(keyword in location_lower for keyword in remote_keywords):
         return True
-    
+
     # Check if location is just "US" or "USA" (indicates remote/nationwide)
     if location_lower.strip() in ["us", "usa", "united states"]:
         return True
-    
+
     # Check for Florida - state name or abbreviation
     florida_keywords = ["florida", " fl ", " fl,", ",fl"]
     if location_lower.endswith(" fl") or location_lower.endswith(",fl"):
         return True
     if any(keyword in location_lower for keyword in florida_keywords):
         return True
-    
+
     # Check for Florida counties (Adzuna often returns locations like "Tampa, Hillsborough County")
     florida_counties = [
-        "miami-dade", "broward", "palm beach", "hillsborough", "orange", 
+        "miami-dade", "broward", "palm beach", "hillsborough", "orange",
         "pinellas", "duval", "lee", "polk", "brevard", "volusia", "pasco",
         "seminole", "sarasota", "manatee", "collier", "escambia", "osceola",
         "marion", "st. lucie", "lake", "hernando", "charlotte", "alachua"
     ]
     if any(county in location_lower for county in florida_counties):
         return True
-    
+
+    # Check for Seattle metro area — Adzuna returns "Seattle, King County",
+    # "Bellevue, King County", "Redmond, King County", "Seattle, WA", etc.
+    seattle_keywords = ["seattle", ", wa", " wa,"]
+    if location_lower.endswith(" wa") or location_lower.endswith(",wa"):
+        return True
+    if any(keyword in location_lower for keyword in seattle_keywords):
+        return True
+    if "king county" in location_lower:
+        return True
+
     return False
 
 

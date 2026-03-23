@@ -5,9 +5,8 @@
 title_keywords:
   - data engineer
   - analytics engineer
-  - analytics
-  - applied ai
-  - agentic
+  - agentic analytics
+  - AI analytics
 
 # Skills you have / want to use
 skills:
@@ -41,10 +40,11 @@ location_preference: remote
 preferred_locations:
   - Tampa, FL
   - Orlando, FL
+  - Seattle, WA
   - Remote
 
-salary_target: 150000  # soft preference threshold — compensation signals below this are a soft negative; role may still pass on other merits
-salary_min: 140000     # hard floor — roles that explicitly list compensation below this are rejected outright regardless of other factors
+salary_target: 150000 # soft preference threshold — compensation signals below this are a soft negative; role may still pass on other merits
+salary_min: 140000 # hard floor — roles that explicitly list compensation below this are rejected outright regardless of other factors
 
 # Maximum job age (days) - filter out postings older than this
 max_job_age_days: 60

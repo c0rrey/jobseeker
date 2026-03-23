@@ -148,6 +148,12 @@ def run(
             url: str = job["url"]
             source: str = job["source"]
 
+            # Adzuna land/ad/ redirect URLs always return 403 — skip them
+            if "/land/ad/" in url:
+                logger.info("Skipping job id=%d — land/ad/ URL cannot be fetched", db_id)
+                failed += 1
+                continue
+
             logger.info("Fetching job id=%d url=%s", db_id, url)
             try:
                 text = fetcher.fetch_full_description(url=url, source=source)

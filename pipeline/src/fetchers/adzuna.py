@@ -101,10 +101,10 @@ class AdzunaFetcher(BaseFetcher):
         for keyword_idx, keyword in enumerate(keywords, 1):
             logger.info("Keyword %d/%d: '%s'", keyword_idx, len(keywords), keyword)
             
-            # Search both Florida and nationwide remote for this keyword
+            # Target Seattle area only
             locations = [
-                ("Florida", "Florida"),
-                ("Remote", "")  # Empty string = nationwide
+                ("Seattle", "Seattle, Washington"),
+                ("Seattle WA", "Seattle, WA"),
             ]
             
             for location_name, location_query in locations:
