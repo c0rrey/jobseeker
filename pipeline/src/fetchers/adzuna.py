@@ -66,6 +66,9 @@ def _build_location_tuples(preferred_locations: list[str]) -> list[tuple[str, st
     """
     tuples: list[tuple[str, str]] = []
     for entry in preferred_locations:
+        if not isinstance(entry, str) or not entry.strip():
+            logger.debug("Skipping non-string or blank preferred_locations entry: %r", entry)
+            continue
         if entry.strip().lower() == "remote":
             continue
         # Split on the last comma to handle multi-word city names like

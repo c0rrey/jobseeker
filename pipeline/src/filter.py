@@ -273,6 +273,9 @@ def is_allowed_location(job: Job, preferred_locations: list[str] | None = None) 
         return True
 
     for entry in preferred_locations:
+        if not isinstance(entry, str) or not entry.strip():
+            logger.debug("Skipping non-string or blank preferred_locations entry: %r", entry)
+            continue
         entry_lower = entry.lower().strip()
 
         # Skip remote-sentinel entries; the universal check above covers them.
