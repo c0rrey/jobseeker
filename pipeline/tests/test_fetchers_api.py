@@ -282,6 +282,48 @@ class TestAdzunaFetcherFetch:
 
         assert fetcher.results_per_page == 50
 
+    @patch("pipeline.src.fetchers.adzuna.time.sleep")
+    @patch("pipeline.src.fetchers.adzuna.load_profile")
+    @patch("pipeline.src.fetchers.adzuna.requests.get")
+    def test_fetch_null_results_value_returns_empty_list(
+        self,
+        mock_get: MagicMock,
+        mock_load_profile: MagicMock,
+        mock_sleep: MagicMock,
+    ) -> None:
+        """API response with results=null returns [] without raising TypeError."""
+        mock_load_profile.return_value = MOCK_PROFILE
+        mock_get.return_value = self._mock_response({"results": None})
+
+        fetcher = AdzunaFetcher(app_id="test-id", app_key="test-key", max_pages=1)
+        result = fetcher.fetch()
+
+        assert result == []
+
+    @patch("pipeline.src.fetchers.adzuna.time.sleep")
+    @patch("pipeline.src.fetchers.adzuna.load_profile")
+    @patch("pipeline.src.fetchers.adzuna.requests.get")
+    def test_fetch_skips_non_dict_elements_in_results(
+        self,
+        mock_get: MagicMock,
+        mock_load_profile: MagicMock,
+        mock_sleep: MagicMock,
+    ) -> None:
+        """Non-dict elements (e.g. null) in results array are skipped without AttributeError."""
+        valid_job = {
+            "id": "az-003",
+            "title": "Data Engineer",
+            "redirect_url": "https://adzuna.com/jobs/az-003",
+        }
+        mock_load_profile.return_value = MOCK_PROFILE
+        mock_get.return_value = self._mock_response({"results": [None, valid_job]})
+
+        fetcher = AdzunaFetcher(app_id="test-id", app_key="test-key", max_pages=1)
+        result = fetcher.fetch()
+
+        assert len(result) == 1
+        assert result[0]["redirect_url"] == "https://adzuna.com/jobs/az-003"
+
 
 # ---------------------------------------------------------------------------
 # RemoteOKFetcher.fetch() — mocked HTTP
