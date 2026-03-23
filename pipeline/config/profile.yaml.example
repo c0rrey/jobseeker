@@ -39,8 +39,10 @@ avoid_industries:
 # Location preference: remote | hybrid | onsite (or a list of these)
 location_preference: remote
 
-# Preferred locations (for LLM scoring - not hard filters)
-# Jobs in these areas will score higher, but all matching remote jobs are included
+# Preferred locations — drives both Adzuna API search queries and LLM scoring.
+# Each "City, ST" entry generates location-targeted API requests; "Remote" entries
+# are skipped for Adzuna (no geographic where param) but still influence LLM scoring.
+# To target a new city, add it here — no code changes required.
 preferred_locations:
   - Austin, TX
   - Denver, CO

@@ -87,7 +87,8 @@ REMOTEOK_RESPONSE: list[Any] = [
 MOCK_PROFILE: dict[str, Any] = {
     "title_keywords": ["data engineer"],
     "salary_target": 130000,
-    "locations": ["Florida", "Remote"],
+    "preferred_locations": ["Tampa, FL", "Seattle, WA", "Remote"],
+    "max_job_age_days": 60,
 }
 
 
@@ -323,6 +324,200 @@ class TestAdzunaFetcherFetch:
 
         assert len(result) == 1
         assert result[0]["redirect_url"] == "https://adzuna.com/jobs/az-003"
+
+    # ------------------------------------------------------------------
+    # Profile-driven location and max_days_old tests (seek-210)
+    # ------------------------------------------------------------------
+
+    @patch("pipeline.src.fetchers.adzuna.time.sleep")
+    @patch("pipeline.src.fetchers.adzuna.load_profile")
+    @patch("pipeline.src.fetchers.adzuna.requests.get")
+    def test_fetch_issues_requests_for_tampa_and_seattle(
+        self,
+        mock_get: MagicMock,
+        mock_load_profile: MagicMock,
+        mock_sleep: MagicMock,
+    ) -> None:
+        """Tampa and Seattle locations from preferred_locations appear as 'where' params."""
+        mock_load_profile.return_value = MOCK_PROFILE
+        mock_get.return_value = self._mock_response({"results": []})
+
+        fetcher = AdzunaFetcher(app_id="test-id", app_key="test-key", max_pages=1)
+        fetcher.fetch()
+
+        # Collect all 'where' values used across API calls.
+        # requests.get is always called with keyword params= arg in this codebase.
+        all_where = [
+            call.kwargs.get("params", {}).get("where")
+            for call in mock_get.call_args_list
+            if call.kwargs.get("params", {}).get("where")
+        ]
+
+        tampa_hits = [w for w in all_where if "Tampa" in w]
+        seattle_hits = [w for w in all_where if "Seattle" in w]
+        remote_hits = [w for w in all_where if w == "Remote"]
+
+        assert tampa_hits, f"Expected Tampa in where params, got: {all_where}"
+        assert seattle_hits, f"Expected Seattle in where params, got: {all_where}"
+        assert not remote_hits, f"'Remote' must never appear as where param, got: {all_where}"
+
+    @patch("pipeline.src.fetchers.adzuna.time.sleep")
+    @patch("pipeline.src.fetchers.adzuna.load_profile")
+    @patch("pipeline.src.fetchers.adzuna.requests.get")
+    def test_fetch_skips_remote_in_where_param(
+        self,
+        mock_get: MagicMock,
+        mock_load_profile: MagicMock,
+        mock_sleep: MagicMock,
+    ) -> None:
+        """'Remote' in preferred_locations never appears as a 'where' API param."""
+        mock_load_profile.return_value = MOCK_PROFILE  # contains Remote
+        mock_get.return_value = self._mock_response({"results": []})
+
+        fetcher = AdzunaFetcher(app_id="test-id", app_key="test-key", max_pages=1)
+        fetcher.fetch()
+
+        for call in mock_get.call_args_list:
+            params = call.kwargs.get("params") or (call.args[1] if len(call.args) > 1 else {})
+            assert params.get("where") != "Remote", (
+                "'Remote' must not be used as a geographic where param"
+            )
+
+    @patch("pipeline.src.fetchers.adzuna.time.sleep")
+    @patch("pipeline.src.fetchers.adzuna.load_profile")
+    @patch("pipeline.src.fetchers.adzuna.requests.get")
+    def test_fetch_empty_preferred_locations_returns_empty(
+        self,
+        mock_get: MagicMock,
+        mock_load_profile: MagicMock,
+        mock_sleep: MagicMock,
+    ) -> None:
+        """When preferred_locations is empty, fetch() returns [] without making API calls."""
+        mock_load_profile.return_value = {
+            "title_keywords": ["data engineer"],
+            "salary_target": 130000,
+            "preferred_locations": [],
+        }
+        mock_get.return_value = self._mock_response({"results": []})
+
+        fetcher = AdzunaFetcher(app_id="test-id", app_key="test-key", max_pages=1)
+        result = fetcher.fetch()
+
+        assert result == []
+        mock_get.assert_not_called()
+
+    @patch("pipeline.src.fetchers.adzuna.time.sleep")
+    @patch("pipeline.src.fetchers.adzuna.load_profile")
+    @patch("pipeline.src.fetchers.adzuna.requests.get")
+    def test_fetch_empty_locations_logs_warning(
+        self,
+        mock_get: MagicMock,
+        mock_load_profile: MagicMock,
+        mock_sleep: MagicMock,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """When preferred_locations is empty, a warning containing 'no search locations' is logged."""
+        mock_load_profile.return_value = {
+            "title_keywords": ["data engineer"],
+            "salary_target": 130000,
+            "preferred_locations": [],
+        }
+        mock_get.return_value = self._mock_response({"results": []})
+
+        fetcher = AdzunaFetcher(app_id="test-id", app_key="test-key", max_pages=1)
+
+        import logging as _logging
+        with caplog.at_level(_logging.WARNING, logger="pipeline.src.fetchers.adzuna"):
+            result = fetcher.fetch()
+
+        assert result == []
+        warning_messages = [r.message for r in caplog.records if r.levelno == _logging.WARNING]
+        assert any("no search locations" in msg for msg in warning_messages), (
+            f"Expected 'no search locations' warning, got: {warning_messages}"
+        )
+
+    @patch("pipeline.src.fetchers.adzuna.time.sleep")
+    @patch("pipeline.src.fetchers.adzuna.load_profile")
+    @patch("pipeline.src.fetchers.adzuna.requests.get")
+    def test_fetch_max_days_old_from_profile(
+        self,
+        mock_get: MagicMock,
+        mock_load_profile: MagicMock,
+        mock_sleep: MagicMock,
+    ) -> None:
+        """With max_job_age_days: 30 in profile, API requests use max_days_old=30."""
+        mock_load_profile.return_value = {
+            "title_keywords": ["data engineer"],
+            "salary_target": 130000,
+            "preferred_locations": ["Tampa, FL"],
+            "max_job_age_days": 30,
+        }
+        mock_get.return_value = self._mock_response({"results": []})
+
+        fetcher = AdzunaFetcher(app_id="test-id", app_key="test-key", max_pages=1)
+        fetcher.fetch()
+
+        assert mock_get.called
+        for call in mock_get.call_args_list:
+            params = call.kwargs.get("params") or {}
+            assert params.get("max_days_old") == 30, (
+                f"Expected max_days_old=30, got {params.get('max_days_old')}"
+            )
+
+    @patch("pipeline.src.fetchers.adzuna.time.sleep")
+    @patch("pipeline.src.fetchers.adzuna.load_profile")
+    @patch("pipeline.src.fetchers.adzuna.requests.get")
+    def test_fetch_max_days_old_default_when_absent(
+        self,
+        mock_get: MagicMock,
+        mock_load_profile: MagicMock,
+        mock_sleep: MagicMock,
+    ) -> None:
+        """When max_job_age_days is absent from profile, max_days_old defaults to 60."""
+        mock_load_profile.return_value = {
+            "title_keywords": ["data engineer"],
+            "salary_target": 130000,
+            "preferred_locations": ["Tampa, FL"],
+            # max_job_age_days intentionally absent
+        }
+        mock_get.return_value = self._mock_response({"results": []})
+
+        fetcher = AdzunaFetcher(app_id="test-id", app_key="test-key", max_pages=1)
+        fetcher.fetch()
+
+        assert mock_get.called
+        for call in mock_get.call_args_list:
+            params = call.kwargs.get("params") or {}
+            assert params.get("max_days_old") == 60, (
+                f"Expected max_days_old=60, got {params.get('max_days_old')}"
+            )
+
+    @patch("pipeline.src.fetchers.adzuna.time.sleep")
+    @patch("pipeline.src.fetchers.adzuna.load_profile")
+    @patch("pipeline.src.fetchers.adzuna.requests.get")
+    def test_fetch_denver_location_without_code_changes(
+        self,
+        mock_get: MagicMock,
+        mock_load_profile: MagicMock,
+        mock_sleep: MagicMock,
+    ) -> None:
+        """Adding 'Denver, CO' to preferred_locations produces Denver API requests."""
+        mock_load_profile.return_value = {
+            "title_keywords": ["data engineer"],
+            "salary_target": 130000,
+            "preferred_locations": ["Denver, CO"],
+        }
+        mock_get.return_value = self._mock_response({"results": []})
+
+        fetcher = AdzunaFetcher(app_id="test-id", app_key="test-key", max_pages=1)
+        fetcher.fetch()
+
+        all_where = [
+            call.kwargs.get("params", {}).get("where")
+            for call in mock_get.call_args_list
+        ]
+        denver_hits = [w for w in all_where if w and "Denver" in w]
+        assert denver_hits, f"Expected Denver in where params, got: {all_where}"
 
 
 # ---------------------------------------------------------------------------
