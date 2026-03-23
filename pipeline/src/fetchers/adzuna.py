@@ -47,7 +47,9 @@ class AdzunaFetcher(BaseFetcher):
             country: Country code (us, uk, etc.)
             results_per_page: Results per page (max 50)
             max_pages: Maximum pages to fetch per keyword per location
-            auto_increase_pages: If True, increases to 10 pages when hitting limits
+            auto_increase_pages: If True, logs a warning recommending the caller
+                re-run with ``max_pages=10`` when pagination limits are detected.
+                Does not automatically increase page count.
         """
         if app_id is None or app_key is None:
             app_id, app_key = get_adzuna_credentials()
@@ -115,6 +117,8 @@ class AdzunaFetcher(BaseFetcher):
                         # Deduplicate by URL
                         new_jobs = 0
                         for job in jobs:
+                            if not isinstance(job, dict):
+                                continue
                             url = job.get("redirect_url", "")
                             if url and url not in seen_urls:
                                 seen_urls.add(url)
@@ -191,7 +195,7 @@ class AdzunaFetcher(BaseFetcher):
             data = response.json()
             if not isinstance(data, dict):
                 return []
-            return data.get("results", [])
+            return data.get("results") or []
             
         except requests.exceptions.HTTPError as e:
             # Try to get more details from the response
