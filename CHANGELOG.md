@@ -1,5 +1,34 @@
 # Changelog
 
+## 2026-03-22 — Session 20260322-193812 (docs quality pass, README DX fixes, adzuna null-safety)
+
+### Summary
+
+Nine tasks completed across two waves plus a post-review fix cycle (seek-184 verified and closed from prior session). Wave 1 tightened the adzuna fetcher type annotation, confirmed web comments were already clean (seek-183 no-op), and rewrote README with architecture-first Mermaid diagrams, scoring table, and Next.js 16 badge. Wave 2 added Prerequisites, a Makefile Targets table (9 targets), and a Troubleshooting table (6 rows). Round 1 review found 2 P1 and 3 P2 issues; the fix cycle corrected the `auto_increase_pages` docstring, added null-safety guards to the adzuna fetcher (`or []` + `isinstance` guard), restored missing `make test` terminal output, fixed the broken `.env.example` instruction, and aligned the `make all` stage list. Round 2 returned a clean PASS. 6 commits, 6 new crumbs filed (5 fixed, 1 deferred: seek-209 P3).
+
+### Implementation (Waves 1–2)
+
+- **seek-182**: fix: `adzuna.py` return type `list[dict]` → `list[dict[str, Any]]`; `filter.py` already clean (`79a9707`)
+- **seek-183**: no-op: web comment files already clean — no commit
+- **seek-184**: verified and closed — work completed in prior session 20260322-162003 (`e151175`)
+- **seek-185**: docs: rewrite `README.md` with architecture-first Mermaid diagrams, scoring table, Next.js 16 badge, tech stack (`1c65ad9`)
+- **seek-186**: docs: add Prerequisites, Makefile Targets table (9 targets), Troubleshooting table (6 rows), `.env.example` disclosure (`61d5f54`)
+
+### Review Fixes (Fix Cycle)
+
+- **seek-204**: fix: correct `auto_increase_pages` docstring — "logs advisory warning, does not increase page count" (`e8fa306`)
+- **seek-208**: fix: add `or []` null guard for `results` and `isinstance(job, dict)` guard; 3 new tests (`e8fa306`, `6828ae7`)
+- **seek-205, seek-206, seek-207**: fix: restore `747 passed in 14.07s` test output, replace broken `cp .env.example .env` with inline key template, align `make all` to 3-stage pipeline (`ab4e51f`)
+
+### Review Statistics
+
+| Round | Scope | P1 | P2 | P3 | Verdict |
+|-------|-------|----|----|-----|---------|
+| 1 | 5 tasks (waves 1–2) | 2 | 3 | 1 | PASS WITH ISSUES |
+| 2 | 5 fix tasks | 0 | 0 | 0 | PASS |
+
+11 raw findings → 9 root causes → 6 filed, 3 skipped (existing: seek-189, seek-190, seek-203). All P1/P2s fixed; seek-209 (P3, Florida magic string) deferred.
+
 ## 2026-03-22 — Session 20260322-162003 (PII removal, public repo, code quality, README rewrite)
 
 ### Summary
