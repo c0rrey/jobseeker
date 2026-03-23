@@ -16,3 +16,6 @@ __pycache__/
 # Data files
 data/
 docs/
+
+# crumb session artifacts (ephemeral — not committed)
+.crumbs/sessions/
