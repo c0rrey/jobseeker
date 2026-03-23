@@ -550,7 +550,9 @@ def upsert_pass1_results_from_files(
 
 
 def get_pass1_survivors(
-    db_connection: sqlite3.Connection, current_profile_hash: str = ""
+    db_connection: sqlite3.Connection,
+    current_profile_hash: str = "",
+    since: str | None = None,
 ) -> list[dict[str, Any]]:
     """Return jobs that passed Pass 1 and need Pass 2 deep scoring.
 
@@ -574,6 +576,14 @@ def get_pass1_survivors(
         current_profile_hash: SHA-256 hex digest of the current combined
             profile state, as returned by :func:`compute_profile_hash`.
             Pass an empty string if no profile snapshot exists yet.
+        since: Optional ISO-8601 timestamp string.  When provided, only jobs
+            whose ``fetched_at`` is at or after this timestamp are returned.
+            Both ``'2026-03-23T10:00:00'`` (with ``T`` separator) and
+            ``'2026-03-23 10:00:00'`` (with space separator) are accepted;
+            the ``T`` is normalized to a space internally before the SQL
+            comparison.  When ``None`` (the default), no ``fetched_at``
+            filter is applied and results are identical to calling the
+            function without this parameter.
 
     Returns:
         List of dicts with keys: id, title, company, location, description,
@@ -591,6 +601,16 @@ def get_pass1_survivors(
         At most one job per duplicate group (the representative).
         Empty list when no jobs require Pass 2 scoring.
     """
+    since_clause = ""
+    params: dict[str, Any] = {
+        "pass1": PASS_1,
+        "pass2": PASS_2,
+        "current_hash": current_profile_hash,
+    }
+    if since is not None:
+        since_clause = "AND j.fetched_at >= :since"
+        params["since"] = since.replace("T", " ", 1)
+
     cursor = db_connection.execute(
         f"""
         SELECT
@@ -615,9 +635,10 @@ def get_pass1_survivors(
             OR sd2.profile_hash != :current_hash
         )
           {_DUP_FILTER}
+          {since_clause}
         ORDER BY sd1.overall DESC, j.id
         """,
-        {"pass1": PASS_1, "pass2": PASS_2, "current_hash": current_profile_hash},
+        params,
     )
     rows = cursor.fetchall()
     return [dict(row) for row in rows]
