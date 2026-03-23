@@ -473,7 +473,7 @@ class TestAdzunaFetcherFetch:
         mock_load_profile: MagicMock,
         mock_sleep: MagicMock,
     ) -> None:
-        """When max_job_age_days is absent from profile, max_days_old defaults to 60."""
+        """When max_job_age_days is absent from profile, max_days_old defaults to 90."""
         mock_load_profile.return_value = {
             "title_keywords": ["data engineer"],
             "salary_target": 130000,
@@ -488,8 +488,8 @@ class TestAdzunaFetcherFetch:
         assert mock_get.called
         for call in mock_get.call_args_list:
             params = call.kwargs.get("params") or {}
-            assert params.get("max_days_old") == 60, (
-                f"Expected max_days_old=60, got {params.get('max_days_old')}"
+            assert params.get("max_days_old") == 90, (
+                f"Expected max_days_old=90, got {params.get('max_days_old')}"
             )
 
     @patch("pipeline.src.fetchers.adzuna.time.sleep")

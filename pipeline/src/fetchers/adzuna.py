@@ -116,18 +116,18 @@ class AdzunaFetcher(BaseFetcher):
         country: str = "us",
         results_per_page: int = 50,
         max_pages: int = 20,
-        auto_increase_pages: bool = True,
+        warn_on_pagination_limit: bool = True,
     ):
         """
         Initialize Adzuna fetcher.
-        
+
         Args:
             app_id: Adzuna app ID (loads from env if not provided)
             app_key: Adzuna app key (loads from env if not provided)
             country: Country code (us, uk, etc.)
             results_per_page: Results per page (max 50)
             max_pages: Maximum pages to fetch per keyword per location
-            auto_increase_pages: If True, logs a warning recommending the caller
+            warn_on_pagination_limit: If True, logs a warning recommending the caller
                 re-run with ``max_pages=10`` when pagination limits are detected.
                 Does not automatically increase page count.
         """
@@ -139,7 +139,7 @@ class AdzunaFetcher(BaseFetcher):
         self.country = country
         self.results_per_page = min(results_per_page, 50)  # API max is 50
         self.max_pages = max_pages
-        self.auto_increase_pages = auto_increase_pages
+        self.warn_on_pagination_limit = warn_on_pagination_limit
         self.base_url = f"https://api.adzuna.com/v1/api/jobs/{country}/search"
 
     def fetch(self) -> list[dict[str, Any]]:
@@ -152,7 +152,7 @@ class AdzunaFetcher(BaseFetcher):
         When ``preferred_locations`` is empty, returns an empty list immediately.
 
         ``max_days_old`` is read from ``max_job_age_days`` in the profile
-        (default 60 if absent).
+        (default 90 if absent).
 
         Returns:
             List of raw job dicts from Adzuna
@@ -167,8 +167,8 @@ class AdzunaFetcher(BaseFetcher):
         # Get keywords from profile
         keywords = profile.get("title_keywords", ["data engineer"])
 
-        # Read max_job_age_days from profile; fall back to 60 if absent
-        max_days_old: int = profile.get("max_job_age_days", 60)
+        # Read max_job_age_days from profile; fall back to 90 if absent
+        max_days_old: int = profile.get("max_job_age_days", 90)
 
         # Build location search tuples from profile, skipping 'Remote'
         preferred_locations: list[str] = profile.get("preferred_locations", [])
@@ -246,7 +246,7 @@ class AdzunaFetcher(BaseFetcher):
         logger.info("Total: %d unique jobs fetched", len(all_jobs))
         
         # Auto-increase pagination if we're hitting limits frequently
-        if need_more_pages and self.auto_increase_pages and self.max_pages < 10:
+        if need_more_pages and self.warn_on_pagination_limit and self.max_pages < 10:
             logger.warning("Hit pagination limit on some searches.")
             logger.warning("Consider running again with max_pages=10 for better coverage.")
             logger.warning("Example: AdzunaFetcher(max_pages=10)")
@@ -259,7 +259,7 @@ class AdzunaFetcher(BaseFetcher):
         what: str,
         where: str,
         salary_min: Optional[int] = None,
-        max_days_old: int = 60,
+        max_days_old: int = 90,
     ) -> list[dict[str, Any]]:
         """
         Fetch a single page of results.
@@ -269,7 +269,7 @@ class AdzunaFetcher(BaseFetcher):
             what: Search query (job titles/keywords)
             where: Location query
             salary_min: Minimum salary filter
-            max_days_old: Maximum age of postings in days (default 60)
+            max_days_old: Maximum age of postings in days (default 90)
 
         Returns:
             List of job dicts from this page
