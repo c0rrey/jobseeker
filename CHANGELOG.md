@@ -1,5 +1,33 @@
 # Changelog
 
+## 2026-03-23 — Session ea99b849 (profile-driven location and comp config)
+
+### Summary
+
+Seven tasks completed across two implementation waves and one review fix cycle, closing trail seek-T21 (Drive fetch and filter from profile.yaml). The Adzuna fetcher now reads search locations and job age from `profile.yaml`, the salary floor respects `salary_min` with fallback to `salary_target`, and the location filter allowlist is derived dynamically from `preferred_locations` with city, state-abbreviation, full-state-name, and county-synonym matching. Round 1 review found 1 P1 and 3 P2 issues (stale docstrings, None crash on malformed YAML, default mismatch, misleading parameter name); all were auto-fixed in the same session. Round 2 returned a clean PASS. 7 commits total.
+
+### Implementation (Waves 1–2)
+
+- **seek-211**: feat: use salary_min as hard cutoff floor in prefilter and filter — `salary_min or salary_target` fallback at both salary read sites in `filter.py`; 4 new tests (`38b88e7`)
+- **seek-210**: feat: read search locations and max_days_old from profile in Adzuna fetcher — `_build_location_tuples()` replaces hardcoded location list; `_fetch_page()` parameterized; 7 new tests (`8eece79`)
+- **seek-212**: feat: derive location filter allowlist from preferred_locations in profile — `is_allowed_location()` rewritten with city/state/county matching; 20 new tests (`2fac336`)
+
+### Review Fixes (Round 1)
+
+- **seek-213**: fix: update stale filter.py docstrings after location/non-IC refactor (`769aa5b`)
+- **seek-214**: fix: guard against None/non-string entries in preferred_locations iteration in adzuna.py and filter.py (`f0937c1`)
+- **seek-215**: fix: harmonize max_job_age_days fallback default to 90 across adzuna.py and tests (`f1e5f46`)
+- **seek-216**: fix: rename auto_increase_pages to warn_on_pagination_limit in adzuna.py (`f1e5f46`)
+
+### Review Statistics
+
+| Round | Scope | P1 | P2 | P3 | Verdict |
+|-------|-------|----|----|-----|---------|
+| 1 | 3 tasks (waves 1–2) | 1 | 3 | 3 | PASS WITH ISSUES |
+| 2 | 4 fix tasks | 0 | 0 | 0 | PASS |
+
+9 raw findings → 7 root causes (2 merges). All 4 P1/P2 findings fixed in session. 3 P3s deferred (seek-217, seek-218, seek-219).
+
 ## 2026-03-22 — Session 20260322-193812 (docs quality pass, README DX fixes, adzuna null-safety)
 
 ### Summary
