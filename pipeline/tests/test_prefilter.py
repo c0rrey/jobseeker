@@ -101,8 +101,13 @@ def db() -> Generator[sqlite3.Connection, None, None]:
 
 @pytest.fixture(autouse=True)
 def _patch_profile(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Patch load_profile() to return deterministic settings for all tests."""
+    """Patch load_profile() to return deterministic settings for all tests.
+
+    Includes both salary_min (hard floor) and salary_target so the fallback
+    chain is exercised correctly in the baseline fixture.
+    """
     profile = {
+        "salary_min": 100_000,
         "salary_target": 100_000,
         "max_job_age_days": 30,
         "title_keywords": ["data engineer"],
@@ -266,6 +271,130 @@ class TestSalaryFilter:
         run_prefilter(db)
         sentinel = get_sentinel(db, job_id)
         assert sentinel is None
+
+
+# ---------------------------------------------------------------------------
+# Salary floor fallback chain
+# ---------------------------------------------------------------------------
+
+
+class TestSalaryFloorFallback:
+    """Verify the salary floor fallback chain: salary_min -> salary_target -> 100000."""
+
+    def test_salary_min_used_as_floor_not_salary_target(
+        self,
+        db: sqlite3.Connection,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """With salary_min=140000 and salary_target=150000, a job at $145k passes."""
+        monkeypatch.setattr(
+            "pipeline.src.filter.load_profile",
+            lambda: {
+                "salary_min": 140_000,
+                "salary_target": 150_000,
+                "max_job_age_days": 30,
+                "title_keywords": ["data engineer"],
+            },
+        )
+        # $145k is between salary_min and salary_target — should pass
+        job_id = insert_job(db, salary_min=130_000, salary_max=145_000)
+        run_prefilter(db)
+        sentinel = get_sentinel(db, job_id)
+        assert sentinel is None, (
+            "Job at $145k max should pass when salary_min=140000 is the floor"
+        )
+
+    def test_salary_below_salary_min_is_filtered(
+        self,
+        db: sqlite3.Connection,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """With salary_min=140000, a job whose max is $135k is rejected."""
+        monkeypatch.setattr(
+            "pipeline.src.filter.load_profile",
+            lambda: {
+                "salary_min": 140_000,
+                "salary_target": 150_000,
+                "max_job_age_days": 30,
+                "title_keywords": ["data engineer"],
+            },
+        )
+        job_id = insert_job(db, salary_min=120_000, salary_max=135_000)
+        run_prefilter(db)
+        sentinel = get_sentinel(db, job_id)
+        assert sentinel is not None
+        assert sentinel["reasoning"] == "salary"
+
+    def test_fallback_to_salary_target_when_salary_min_absent(
+        self,
+        db: sqlite3.Connection,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """When salary_min is absent, salary_target is used as the floor."""
+        monkeypatch.setattr(
+            "pipeline.src.filter.load_profile",
+            lambda: {
+                "salary_target": 150_000,
+                "max_job_age_days": 30,
+                "title_keywords": ["data engineer"],
+            },
+        )
+        # $145k max should be rejected because floor falls back to salary_target=150k
+        job_id_below = insert_job(
+            db,
+            salary_min=130_000,
+            salary_max=145_000,
+            url="https://example.com/below",
+        )
+        # $155k max should pass
+        job_id_above = insert_job(
+            db,
+            salary_min=140_000,
+            salary_max=155_000,
+            url="https://example.com/above",
+        )
+        run_prefilter(db)
+        assert get_sentinel(db, job_id_below) is not None, (
+            "Job at $145k max should fail when floor falls back to salary_target=150000"
+        )
+        assert get_sentinel(db, job_id_above) is None, (
+            "Job at $155k max should pass when floor falls back to salary_target=150000"
+        )
+
+    def test_fallback_to_hardcoded_default_when_both_absent(
+        self,
+        db: sqlite3.Connection,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """When both salary_min and salary_target are absent, floor is 100000."""
+        monkeypatch.setattr(
+            "pipeline.src.filter.load_profile",
+            lambda: {
+                "max_job_age_days": 30,
+                "title_keywords": ["data engineer"],
+            },
+        )
+        # $105k max should pass (above 100k default floor)
+        job_id_pass = insert_job(
+            db,
+            salary_min=90_000,
+            salary_max=105_000,
+            url="https://example.com/pass",
+        )
+        # $80k max should fail (below 100k default floor)
+        job_id_fail = insert_job(
+            db,
+            salary_min=70_000,
+            salary_max=80_000,
+            url="https://example.com/fail",
+        )
+        run_prefilter(db)
+        assert get_sentinel(db, job_id_pass) is None, (
+            "Job at $105k max should pass when both salary keys absent (floor=100000)"
+        )
+        assert get_sentinel(db, job_id_fail) is not None, (
+            "Job at $80k max should fail when both salary keys absent (floor=100000)"
+        )
 
 
 # ---------------------------------------------------------------------------
