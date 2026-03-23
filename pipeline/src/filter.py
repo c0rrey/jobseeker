@@ -329,7 +329,7 @@ def filter_jobs(jobs: list[Job]) -> list[Job]:
     3. Intern roles (remove)
     4. Job age (remove old postings)
     5. Red flags (remove problematic keywords)
-    6. Location (keep only remote or Florida)
+    6. Location (keep only locations in preferred_locations from profile, plus universal remote keywords)
     
     Args:
         jobs: List of jobs to filter.
@@ -410,13 +410,15 @@ def run_prefilter(db_connection: sqlite3.Connection) -> dict[str, int]:
     """Read unscored jobs from the database and mark pre-filtered jobs.
 
     Queries jobs that have no entry in ``score_dimensions`` (i.e. have not
-    been processed by any pipeline stage yet) and applies four deterministic
+    been processed by any pipeline stage yet) and applies six deterministic
     filters in order:
 
     1. Red flag keyword/phrase check (``has_red_flags``)
     2. Salary minimum check (``meets_salary_requirement``)
     3. Intern/internship/co-op title check (``is_intern_role``)
-    4. Posting age check (``is_too_old``)
+    4. Non-IC role check (``is_non_ic_role``)
+    5. Posting age check (``is_too_old``)
+    6. Location check (``is_allowed_location``)
 
     Jobs that fail any filter are marked by inserting a sentinel row into
     ``score_dimensions`` with ``pass=0`` and ``overall=-1``.  Downstream
