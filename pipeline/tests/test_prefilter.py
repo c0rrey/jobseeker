@@ -16,7 +16,8 @@ from typing import Generator
 import pytest
 
 from pipeline.src.database import _apply_connection_settings
-from pipeline.src.filter import run_prefilter
+from pipeline.src.filter import is_allowed_location, run_prefilter
+from pipeline.src.models import Job
 
 
 # ---------------------------------------------------------------------------
@@ -104,13 +105,16 @@ def _patch_profile(monkeypatch: pytest.MonkeyPatch) -> None:
     """Patch load_profile() to return deterministic settings for all tests.
 
     Includes both salary_min (hard floor) and salary_target so the fallback
-    chain is exercised correctly in the baseline fixture.
+    chain is exercised correctly in the baseline fixture.  preferred_locations
+    is included so that location filter tests have a stable baseline; other
+    test classes that need different values override via a second monkeypatch.
     """
     profile = {
         "salary_min": 100_000,
         "salary_target": 100_000,
         "max_job_age_days": 30,
         "title_keywords": ["data engineer"],
+        "preferred_locations": ["Tampa, FL", "Seattle, WA", "Remote"],
     }
     monkeypatch.setattr(
         "pipeline.src.filter.load_profile",
@@ -539,3 +543,167 @@ class TestPassThroughJob:
         assert sentinel is None
         assert result["passed"] == 1
         assert result["filtered"] == 0
+
+
+# ---------------------------------------------------------------------------
+# Location filter — is_allowed_location() with preferred_locations param
+# ---------------------------------------------------------------------------
+
+
+def _make_job(location: str | None) -> Job:
+    """Return a minimal Job with only the location field set."""
+    return Job(
+        title="Senior Data Engineer",
+        company="Acme Corp",
+        url="https://example.com/job",
+        source="test",
+        source_type="api",
+        location=location,
+    )
+
+
+class TestIsAllowedLocation:
+    """Unit tests for is_allowed_location() with profile-driven preferred_locations."""
+
+    TAMPA_SEATTLE_REMOTE = ["Tampa, FL", "Seattle, WA", "Remote"]
+
+    # --- AC 2: Tampa county synonym accepted ---
+    def test_tampa_hillsborough_county_accepted(self) -> None:
+        job = _make_job("Tampa, Hillsborough County")
+        assert is_allowed_location(job, self.TAMPA_SEATTLE_REMOTE) is True
+
+    # --- AC 3: Seattle county synonym accepted ---
+    def test_seattle_king_county_accepted(self) -> None:
+        job = _make_job("Seattle, King County")
+        assert is_allowed_location(job, self.TAMPA_SEATTLE_REMOTE) is True
+
+    # --- AC 4: Remote in preferred_locations and in job location accepted ---
+    def test_remote_location_accepted(self) -> None:
+        job = _make_job("Remote")
+        assert is_allowed_location(job, self.TAMPA_SEATTLE_REMOTE) is True
+
+    # --- AC 5: Denver rejected when not in preferred_locations ---
+    def test_denver_rejected_when_not_in_preferred_locations(self) -> None:
+        job = _make_job("Denver, CO")
+        assert is_allowed_location(job, ["Tampa, FL", "Remote"]) is False
+
+    # --- AC 6: Null location always accepted ---
+    def test_null_location_always_accepted(self) -> None:
+        job = _make_job(None)
+        assert is_allowed_location(job, ["Tampa, FL"]) is True
+
+    def test_empty_location_always_accepted(self) -> None:
+        job = _make_job("")
+        assert is_allowed_location(job, ["Tampa, FL"]) is True
+
+    # --- AC 7: Remote keywords always accepted regardless of preferred_locations ---
+    def test_remote_keyword_accepted_regardless_of_preferred_locations(self) -> None:
+        job = _make_job("Work From Home")
+        assert is_allowed_location(job, ["Tampa, FL"]) is True
+
+    def test_wfh_accepted(self) -> None:
+        assert is_allowed_location(_make_job("WFH"), ["Denver, CO"]) is True
+
+    def test_telecommute_accepted(self) -> None:
+        assert is_allowed_location(_make_job("Telecommute"), ["Denver, CO"]) is True
+
+    # --- AC 8: US / USA / United States always accepted ---
+    def test_us_accepted(self) -> None:
+        assert is_allowed_location(_make_job("US"), ["Tampa, FL"]) is True
+
+    def test_usa_accepted(self) -> None:
+        assert is_allowed_location(_make_job("USA"), ["Tampa, FL"]) is True
+
+    def test_united_states_accepted(self) -> None:
+        assert is_allowed_location(_make_job("United States"), ["Tampa, FL"]) is True
+
+    # --- Additional coverage ---
+
+    def test_city_name_match(self) -> None:
+        """Plain city name in job location matches entry."""
+        job = _make_job("Tampa, FL")
+        assert is_allowed_location(job, ["Tampa, FL"]) is True
+
+    def test_state_abbreviation_match(self) -> None:
+        """Job location ending in state abbreviation matches entry."""
+        job = _make_job("Clearwater, FL")
+        assert is_allowed_location(job, ["Tampa, FL"]) is True
+
+    def test_state_full_name_match(self) -> None:
+        """Job location containing full state name matches entry."""
+        job = _make_job("Clearwater, Florida")
+        assert is_allowed_location(job, ["Tampa, FL"]) is True
+
+    def test_empty_preferred_locations_allows_all(self) -> None:
+        """Empty list means no filter configured — fail-open."""
+        job = _make_job("Denver, CO")
+        assert is_allowed_location(job, []) is True
+
+    def test_none_preferred_locations_allows_all(self) -> None:
+        """None means no filter configured — fail-open."""
+        job = _make_job("Denver, CO")
+        assert is_allowed_location(job, None) is True
+
+    def test_wa_abbreviation_does_not_match_iowa(self) -> None:
+        """'WA' token check must not match 'Iowa' via substring."""
+        job = _make_job("Des Moines, Iowa")
+        assert is_allowed_location(job, ["Seattle, WA"]) is False
+
+    # --- Integration: run_prefilter rejects location-mismatched job ---
+    def test_run_prefilter_rejects_wrong_location(
+        self,
+        db: sqlite3.Connection,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """A job in Denver, CO is rejected when preferred_locations is Tampa + Remote."""
+        monkeypatch.setattr(
+            "pipeline.src.filter.load_profile",
+            lambda: {
+                "salary_min": 100_000,
+                "salary_target": 100_000,
+                "max_job_age_days": 30,
+                "title_keywords": ["data engineer"],
+                "preferred_locations": ["Tampa, FL", "Remote"],
+            },
+        )
+        job_id = insert_job(
+            db,
+            title="Senior Data Engineer",
+            url="https://example.com/denver",
+            description="Build pipelines in Denver.",
+            salary_min=120_000,
+            salary_max=160_000,
+        )
+        # Manually set a Denver location since insert_job doesn't expose it.
+        db.execute("UPDATE jobs SET location = 'Denver, CO' WHERE id = ?", (job_id,))
+        db.commit()
+        run_prefilter(db)
+        sentinel = get_sentinel(db, job_id)
+        assert sentinel is not None
+        assert sentinel["reasoning"] == "location"
+
+    def test_run_prefilter_passes_tampa_job(
+        self,
+        db: sqlite3.Connection,
+    ) -> None:
+        """A job in Tampa, Hillsborough County passes when Tampa, FL is in preferred_locations.
+
+        The autouse _patch_profile fixture already sets preferred_locations to
+        ['Tampa, FL', 'Seattle, WA', 'Remote'], so no extra monkeypatch needed.
+        """
+        job_id = insert_job(
+            db,
+            title="Senior Data Engineer",
+            url="https://example.com/tampa-hillsborough",
+            description="Build pipelines in Tampa.",
+            salary_min=120_000,
+            salary_max=160_000,
+        )
+        db.execute(
+            "UPDATE jobs SET location = 'Tampa, Hillsborough County' WHERE id = ?",
+            (job_id,),
+        )
+        db.commit()
+        run_prefilter(db)
+        sentinel = get_sentinel(db, job_id)
+        assert sentinel is None, "Tampa, Hillsborough County should pass when Tampa, FL is in preferred_locations"

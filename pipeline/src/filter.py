@@ -16,6 +16,58 @@ from pipeline.config.settings import load_profile, load_red_flags
 
 from .models import Job
 
+# ---------------------------------------------------------------------------
+# Static reference data for location filtering
+# ---------------------------------------------------------------------------
+
+# Maps US state two-letter abbreviations to lowercase full names.
+# Only the states likely to appear in preferred_locations need to be here;
+# extend as new target metros are added.
+_STATE_ABBR_TO_NAME: dict[str, str] = {
+    "AL": "alabama", "AK": "alaska", "AZ": "arizona", "AR": "arkansas",
+    "CA": "california", "CO": "colorado", "CT": "connecticut", "DE": "delaware",
+    "FL": "florida", "GA": "georgia", "HI": "hawaii", "ID": "idaho",
+    "IL": "illinois", "IN": "indiana", "IA": "iowa", "KS": "kansas",
+    "KY": "kentucky", "LA": "louisiana", "ME": "maine", "MD": "maryland",
+    "MA": "massachusetts", "MI": "michigan", "MN": "minnesota", "MS": "mississippi",
+    "MO": "missouri", "MT": "montana", "NE": "nebraska", "NV": "nevada",
+    "NH": "new hampshire", "NJ": "new jersey", "NM": "new mexico", "NY": "new york",
+    "NC": "north carolina", "ND": "north dakota", "OH": "ohio", "OK": "oklahoma",
+    "OR": "oregon", "PA": "pennsylvania", "RI": "rhode island", "SC": "south carolina",
+    "SD": "south dakota", "TN": "tennessee", "TX": "texas", "UT": "utah",
+    "VT": "vermont", "VA": "virginia", "WA": "washington", "WV": "west virginia",
+    "WI": "wisconsin", "WY": "wyoming", "DC": "district of columbia",
+}
+
+# Maps lowercase city names to a list of lowercase county-name synonyms.
+# Adzuna often returns locations like "Tampa, Hillsborough County" instead of
+# "Tampa, FL".  When a preferred_locations entry includes a city, we also
+# accept any job whose location contains a known county for that city.
+# Add entries here when targeting new metros that use county-style locations.
+_CITY_COUNTY_SYNONYMS: dict[str, list[str]] = {
+    "tampa": ["hillsborough"],
+    "orlando": ["orange", "osceola", "seminole"],
+    "miami": ["miami-dade"],
+    "fort lauderdale": ["broward"],
+    "jacksonville": ["duval"],
+    "st. petersburg": ["pinellas"],
+    "clearwater": ["pinellas"],
+    "sarasota": ["sarasota"],
+    "naples": ["collier"],
+    "fort myers": ["lee"],
+    "seattle": ["king county"],
+    "bellevue": ["king county"],
+    "redmond": ["king county"],
+    "denver": ["denver"],
+    "austin": ["travis"],
+    "portland": ["multnomah"],
+    "chicago": ["cook"],
+    "new york": ["new york", "brooklyn", "queens", "bronx", "staten island"],
+    "los angeles": ["los angeles"],
+    "san francisco": ["san francisco"],
+    "san jose": ["santa clara"],
+}
+
 logger = logging.getLogger(__name__)
 
 
@@ -163,64 +215,106 @@ def has_red_flags(job: Job, red_flags: dict | None = None) -> bool:
     return False
 
 
-def is_allowed_location(job: Job) -> bool:
-    """
-    Return True if the job is in an allowed location.
+def is_allowed_location(job: Job, preferred_locations: list[str] | None = None) -> bool:
+    """Return True if the job is in an allowed location.
 
-    Allowed locations:
-    - Remote (anywhere in the US)
-    - Any location in Florida (including by county name)
-    - Seattle metro area / Washington state (King County)
+    Derives the allowlist dynamically from ``preferred_locations``, which
+    should come from the ``preferred_locations`` key in ``profile.yaml``.
+    If ``preferred_locations`` is ``None`` or empty, all locations are
+    accepted (fail-open behaviour for callers that haven't loaded the
+    profile yet).
 
-    The LLM scorer will consider location preference (Tampa/Orlando/Seattle) as part of the match score.
+    Permanent pass-through rules (always True, regardless of
+    ``preferred_locations``):
+
+    - Job has no location field (null/empty).
+    - Location contains a remote-indicating keyword ("remote", "work from
+      home", "wfh", "telecommute", "anywhere").
+    - Location normalises to one of "us", "usa", "united states".
+
+    For each ``"City, ST"`` entry in ``preferred_locations`` the function
+    accepts a job whose location contains:
+
+    - The city name (case-insensitive substring),
+    - The state abbreviation (as " ST", ",ST", or at the end of the
+      string), or
+    - The full state name, or
+    - A known county synonym for that city (see ``_CITY_COUNTY_SYNONYMS``).
+
+    Entries whose value is a remote-indicating keyword are skipped (the
+    universal remote check above already handles them).
 
     Args:
         job: The job to check.
+        preferred_locations: List of location strings from profile (e.g.
+            ``["Tampa, FL", "Seattle, WA", "Remote"]``).  ``None`` means
+            all locations are allowed.
 
     Returns:
         True if location is allowed, False otherwise.
     """
     if not job.location:
-        # No location specified - could be remote, so allow it
+        # No location specified — could be remote, so allow it.
         return True
 
     location_lower = job.location.lower()
 
-    # Check for remote
+    # Universal: remote-indicating keywords are always allowed.
     remote_keywords = ["remote", "work from home", "wfh", "telecommute", "anywhere"]
     if any(keyword in location_lower for keyword in remote_keywords):
         return True
 
-    # Check if location is just "US" or "USA" (indicates remote/nationwide)
+    # Universal: bare US / USA / United States indicates nationwide posting.
     if location_lower.strip() in ["us", "usa", "united states"]:
         return True
 
-    # Check for Florida - state name or abbreviation
-    florida_keywords = ["florida", " fl ", " fl,", ",fl"]
-    if location_lower.endswith(" fl") or location_lower.endswith(",fl"):
-        return True
-    if any(keyword in location_lower for keyword in florida_keywords):
+    # If no preferred_locations configured, fail-open — allow everything.
+    if not preferred_locations:
         return True
 
-    # Check for Florida counties (Adzuna often returns locations like "Tampa, Hillsborough County")
-    florida_counties = [
-        "miami-dade", "broward", "palm beach", "hillsborough", "orange",
-        "pinellas", "duval", "lee", "polk", "brevard", "volusia", "pasco",
-        "seminole", "sarasota", "manatee", "collier", "escambia", "osceola",
-        "marion", "st. lucie", "lake", "hernando", "charlotte", "alachua"
-    ]
-    if any(county in location_lower for county in florida_counties):
-        return True
+    for entry in preferred_locations:
+        entry_lower = entry.lower().strip()
 
-    # Check for Seattle metro area — Adzuna returns "Seattle, King County",
-    # "Bellevue, King County", "Redmond, King County", "Seattle, WA", etc.
-    seattle_keywords = ["seattle", ", wa", " wa,"]
-    if location_lower.endswith(" wa") or location_lower.endswith(",wa"):
-        return True
-    if any(keyword in location_lower for keyword in seattle_keywords):
-        return True
-    if "king county" in location_lower:
-        return True
+        # Skip remote-sentinel entries; the universal check above covers them.
+        if any(kw in entry_lower for kw in remote_keywords):
+            continue
+
+        # Split on last comma to handle "St. Petersburg, FL" or "New York, NY".
+        if "," in entry_lower:
+            city_lower = entry_lower.rsplit(",", 1)[0].strip()
+            state_abbr = entry_lower.rsplit(",", 1)[1].strip().upper()
+        else:
+            # Entry has no comma — treat the whole thing as a city name.
+            city_lower = entry_lower
+            state_abbr = ""
+
+        state_full = _STATE_ABBR_TO_NAME.get(state_abbr, "")
+
+        # 1. City name match (substring).
+        if city_lower and city_lower in location_lower:
+            return True
+
+        # 2. State abbreviation match — must appear as a token, not a substring
+        #    (avoids "wa" matching "iowa", etc.).
+        if state_abbr:
+            abbr_lower = state_abbr.lower()
+            if (
+                location_lower.endswith(f" {abbr_lower}")
+                or location_lower.endswith(f",{abbr_lower}")
+                or f" {abbr_lower}," in location_lower
+                or f",{abbr_lower}," in location_lower
+                or f" {abbr_lower} " in location_lower
+            ):
+                return True
+
+        # 3. Full state name match.
+        if state_full and state_full in location_lower:
+            return True
+
+        # 4. County synonyms for this city.
+        for county in _CITY_COUNTY_SYNONYMS.get(city_lower, []):
+            if county in location_lower:
+                return True
 
     return False
 
@@ -252,9 +346,10 @@ def filter_jobs(jobs: list[Job]) -> list[Job]:
     # are NOT retroactively updated when this value changes.
     min_salary = profile.get("salary_min") or profile.get("salary_target", 100000)
     title_keywords = profile.get("title_keywords", [])
-    
+    preferred_locations: list[str] = profile.get("preferred_locations", [])
+
     initial_count = len(jobs)
-    
+
     # Filter 1: Title keywords (must match target roles)
     jobs = [j for j in jobs if matches_title_keywords(j, title_keywords)]
     logger.info("After title keyword filter: %s/%s jobs", len(jobs), initial_count)
@@ -275,8 +370,8 @@ def filter_jobs(jobs: list[Job]) -> list[Job]:
     jobs = [j for j in jobs if not has_red_flags(j, red_flags)]
     logger.info("After red flag filter: %s/%s jobs", len(jobs), initial_count)
 
-    # Filter 6: Location filtering
-    jobs = [j for j in jobs if is_allowed_location(j)]
+    # Filter 6: Location filtering — derived from preferred_locations in profile
+    jobs = [j for j in jobs if is_allowed_location(j, preferred_locations)]
     logger.info("After location filter: %s/%s jobs", len(jobs), initial_count)
 
     return jobs
@@ -347,6 +442,7 @@ def run_prefilter(db_connection: sqlite3.Connection) -> dict[str, int]:
     # preference used by LLM scoring.  Existing sentinel rows in score_dimensions
     # are NOT retroactively updated when this value changes.
     min_salary: int = profile.get("salary_min") or profile.get("salary_target", 100000)
+    preferred_locations: list[str] = profile.get("preferred_locations", [])
 
     # Fetch jobs with no score_dimensions entry of any pass.
     unscored_rows = db_connection.execute(
@@ -376,7 +472,7 @@ def run_prefilter(db_connection: sqlite3.Connection) -> dict[str, int]:
             reason = "non_ic"
         elif is_too_old(job, max_age_days):
             reason = "too_old"
-        elif not is_allowed_location(job):
+        elif not is_allowed_location(job, preferred_locations):
             reason = "location"
 
         if reason is not None:
