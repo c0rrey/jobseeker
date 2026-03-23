@@ -112,8 +112,8 @@ Scoring (Pass 1 and Pass 2) runs via Claude Code subagents, NOT the CLI. The pat
 ### Known gotchas
 
 - **Adzuna `land/ad/` URLs**: These redirect URLs always return 403. The description fetcher skips them automatically. The dedup representative selector prefers jobs with `details/` URLs so the representative can have its description fetched.
-- **Location filter** (`pipeline/src/filter.py:is_allowed_location`): Allowlist-based — currently permits Remote, Florida (by state/county), and Seattle metro (by city/county/state abbreviation). When adding a new target location, update this function AND `pipeline/config/profile.yaml` preferred_locations.
-- **Adzuna fetcher locations** (`pipeline/src/fetchers/adzuna.py`): Hardcoded location list in `fetch()`. When targeting a new city, update the `locations` list. Currently set to Seattle + Seattle WA.
+- **Location filter** (`pipeline/src/filter.py:is_allowed_location`): Profile-driven — reads `preferred_locations` from `profile.yaml` and derives the allowlist dynamically (city name, state name/abbreviation, county synonyms). Remote keywords always accepted. To add a new target location, update `preferred_locations` in `profile.yaml` only — no code changes needed.
+- **Adzuna fetcher locations** (`pipeline/src/fetchers/adzuna.py`): Reads `preferred_locations` from `profile.yaml` and builds location queries dynamically. "Remote" entries are skipped (remote jobs captured by city searches). To add a new city, update `preferred_locations` in `profile.yaml` only.
 - **`--fetch-descriptions` not in CLI**: The `--rate-limit` flag is only available via `python3 -m pipeline.scripts.fetch_descriptions`, not `python3 -m pipeline.cli --fetch-descriptions`.
 - **Prefilter rejections are sticky**: Jobs rejected by prefilter get a `pass=0, overall=-1` row in `score_dimensions`. If you change filter rules and want jobs re-evaluated, you must DELETE the old rejection rows first, then re-run `--prefilter`.
 - **Dedup representative timing**: Dedup runs during `--fetch` before descriptions are fetched. Representative selection uses URL format (prefers `details/` over `land/ad/`), not `full_description` presence.
