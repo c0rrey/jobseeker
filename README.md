@@ -137,9 +137,11 @@ python3 -m venv .venv && source .venv/bin/activate
 # make setup works without a venv (installs globally), but a venv is strongly recommended.
 
 # 3. Set up credentials
-cp .env.example .env
-# Edit .env with your API keys (Anthropic, Adzuna, RapidAPI, etc.)
-# Note: .env.example is not yet committed. Create .env manually or ask the repo owner for the template.
+# Create a .env file in the repo root with your API keys:
+#   ANTHROPIC_API_KEY=your-key-here
+#   ADZUNA_APP_ID=your-app-id
+#   ADZUNA_API_KEY=your-api-key
+#   RAPIDAPI_KEY=your-rapidapi-key
 
 # 4. Set up your search profile
 cp pipeline/config/profile.yaml.example pipeline/config/profile.yaml
@@ -149,7 +151,7 @@ cp pipeline/config/profile.yaml.example pipeline/config/profile.yaml
 make setup && make db-reset
 
 # 6. Run the pipeline
-make all         # fetch → deduplicate → pre-filter → enrich
+make all         # fetch → prefilter → enrich
 
 # 7. Launch the dashboard
 make web         # http://localhost:3000
@@ -159,6 +161,8 @@ Run the test suite:
 
 ```
 $ make test
+...
+747 passed in 14.07s
 ```
 
 ### Makefile Targets
