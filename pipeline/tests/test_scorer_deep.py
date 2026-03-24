@@ -30,6 +30,7 @@ from pipeline.src.database import get_connection, init_db
 from pipeline.src.scorer import (
     PASS_1,
     PASS_2,
+    count_pass2_eligible,
     get_pass1_survivors,
     split_into_batches,
     upsert_pass2_results_from_files,
@@ -723,3 +724,345 @@ class TestUpsertPass2ResultsFromFiles:
         ).fetchone()
         assert p1_row["overall"] == 88
         assert p1_row["profile_hash"] == "p1hash"
+
+
+# ---------------------------------------------------------------------------
+# Helper: insert job with explicit fetched_at
+# ---------------------------------------------------------------------------
+
+
+def _insert_job_with_fetched_at(
+    conn: sqlite3.Connection,
+    *,
+    fetched_at: str,
+    title: str = "Staff Data Engineer",
+    company: str = "Acme Corp",
+    url: str | None = None,
+    description: str = "Test job description.",
+    location: str | None = "Remote",
+) -> int:
+    """Insert a job row with an explicit fetched_at timestamp; return its PK.
+
+    The built-in :func:`_insert_job` helper omits fetched_at so the DB
+    default (``datetime('now')``) is used.  Since-filter tests require
+    precise control over fetched_at, so this dedicated helper sets it
+    explicitly via raw SQL.
+    """
+    global _job_counter
+    _job_counter += 1
+    unique_url = url or f"https://example.com/timed/{_job_counter}"
+    conn.execute(
+        """
+        INSERT INTO jobs
+            (source, source_type, url, title, company, description, location,
+             fetched_at)
+        VALUES ('test', 'api', ?, ?, ?, ?, ?, ?)
+        """,
+        (unique_url, title, company, description, location, fetched_at),
+    )
+    conn.commit()
+    row = conn.execute("SELECT last_insert_rowid();").fetchone()
+    return row[0]
+
+
+# ---------------------------------------------------------------------------
+# get_pass1_survivors — since filtering
+# ---------------------------------------------------------------------------
+
+
+class TestGetPass1SurvivorsSinceFilter:
+    """Tests for the since parameter of get_pass1_survivors."""
+
+    def test_since_returns_only_jobs_at_or_after_cutoff(
+        self, db_conn: sqlite3.Connection
+    ) -> None:
+        """Jobs with fetched_at >= since are returned; earlier ones are excluded."""
+        early_id = _insert_job_with_fetched_at(
+            db_conn, fetched_at="2026-03-23 08:00:00", url="https://example.com/early"
+        )
+        late_id = _insert_job_with_fetched_at(
+            db_conn, fetched_at="2026-03-23 12:00:00", url="https://example.com/late"
+        )
+        _insert_score(db_conn, early_id, pass_num=PASS_1, overall=80)
+        _insert_score(db_conn, late_id, pass_num=PASS_1, overall=80)
+
+        result = get_pass1_survivors(db_conn, since="2026-03-23 10:00:00")
+        returned_ids = {r["id"] for r in result}
+        assert returned_ids == {late_id}
+
+    def test_no_since_returns_all_eligible(
+        self, db_conn: sqlite3.Connection
+    ) -> None:
+        """Without a since parameter, all Pass 1 survivors are returned (backward compat)."""
+        early_id = _insert_job_with_fetched_at(
+            db_conn,
+            fetched_at="2026-03-23 08:00:00",
+            url="https://example.com/compat-early",
+        )
+        late_id = _insert_job_with_fetched_at(
+            db_conn,
+            fetched_at="2026-03-23 12:00:00",
+            url="https://example.com/compat-late",
+        )
+        _insert_score(db_conn, early_id, pass_num=PASS_1, overall=75)
+        _insert_score(db_conn, late_id, pass_num=PASS_1, overall=75)
+
+        result = get_pass1_survivors(db_conn)
+        returned_ids = {r["id"] for r in result}
+        assert returned_ids == {early_id, late_id}
+
+    def test_since_at_exact_boundary_is_inclusive(
+        self, db_conn: sqlite3.Connection
+    ) -> None:
+        """A job whose fetched_at equals the since cutoff exactly must be included."""
+        exact_id = _insert_job_with_fetched_at(
+            db_conn,
+            fetched_at="2026-03-23 10:00:00",
+            url="https://example.com/exact",
+        )
+        _insert_score(db_conn, exact_id, pass_num=PASS_1, overall=70)
+
+        result = get_pass1_survivors(db_conn, since="2026-03-23 10:00:00")
+        assert any(r["id"] == exact_id for r in result)
+
+    def test_since_with_iso_t_separator_normalised(
+        self, db_conn: sqlite3.Connection
+    ) -> None:
+        """Both 'T' and ' ' separators are accepted; T is normalised before SQL compare."""
+        job_id = _insert_job_with_fetched_at(
+            db_conn,
+            fetched_at="2026-03-23 12:00:00",
+            url="https://example.com/t-sep",
+        )
+        _insert_score(db_conn, job_id, pass_num=PASS_1, overall=80)
+
+        # T-separator form should resolve to the same result as space-separator
+        result_t = get_pass1_survivors(db_conn, since="2026-03-23T10:00:00")
+        result_space = get_pass1_survivors(db_conn, since="2026-03-23 10:00:00")
+        assert {r["id"] for r in result_t} == {r["id"] for r in result_space}
+
+    def test_since_composes_with_current_profile_hash(
+        self, db_conn: sqlite3.Connection
+    ) -> None:
+        """A stale-hash job fetched before the since cutoff is NOT returned.
+
+        Both predicates apply simultaneously: a job must pass BOTH the
+        profile_hash staleness check AND the fetched_at >= since check.
+        """
+        old_job_id = _insert_job_with_fetched_at(
+            db_conn,
+            fetched_at="2026-03-23 08:00:00",
+            url="https://example.com/compose-old",
+        )
+        new_job_id = _insert_job_with_fetched_at(
+            db_conn,
+            fetched_at="2026-03-23 12:00:00",
+            url="https://example.com/compose-new",
+        )
+        # Both have stale Pass 2 profile_hash so both need re-scoring in theory
+        _insert_score(db_conn, old_job_id, pass_num=PASS_1, overall=80)
+        _insert_score(
+            db_conn, old_job_id, pass_num=PASS_2, overall=60, profile_hash="oldhash"
+        )
+        _insert_score(db_conn, new_job_id, pass_num=PASS_1, overall=80)
+        _insert_score(
+            db_conn, new_job_id, pass_num=PASS_2, overall=60, profile_hash="oldhash"
+        )
+
+        # since filter should eliminate the early job despite it being hash-stale
+        result = get_pass1_survivors(
+            db_conn, "newhash", since="2026-03-23 10:00:00"
+        )
+        returned_ids = {r["id"] for r in result}
+        assert new_job_id in returned_ids
+        assert old_job_id not in returned_ids
+
+    def test_backlog_log_emitted_when_since_reduces_results(
+        self, db_conn: sqlite3.Connection, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """When since filters out jobs, an INFO log with both counts is emitted."""
+        early_id = _insert_job_with_fetched_at(
+            db_conn,
+            fetched_at="2026-03-23 08:00:00",
+            url="https://example.com/log-early",
+        )
+        late_id = _insert_job_with_fetched_at(
+            db_conn,
+            fetched_at="2026-03-23 12:00:00",
+            url="https://example.com/log-late",
+        )
+        _insert_score(db_conn, early_id, pass_num=PASS_1, overall=75)
+        _insert_score(db_conn, late_id, pass_num=PASS_1, overall=75)
+
+        import logging
+
+        with caplog.at_level(logging.INFO, logger="pipeline.src.scorer"):
+            get_pass1_survivors(db_conn, since="2026-03-23 10:00:00")
+
+        backlog_records = [
+            r for r in caplog.records if "total Pass 2-eligible" in r.message
+        ]
+        assert backlog_records, "Expected a backlog INFO log message but none found"
+        # Message must contain both the total (2) and the scoped count (1)
+        msg = backlog_records[0].message
+        assert "2" in msg
+        assert "1" in msg
+
+    def test_no_backlog_log_when_since_omitted(
+        self, db_conn: sqlite3.Connection, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """When since is not provided, no backlog log message is emitted."""
+        job_id = _insert_job_with_fetched_at(
+            db_conn,
+            fetched_at="2026-03-23 08:00:00",
+            url="https://example.com/nolog",
+        )
+        _insert_score(db_conn, job_id, pass_num=PASS_1, overall=75)
+
+        import logging
+
+        with caplog.at_level(logging.INFO, logger="pipeline.src.scorer"):
+            get_pass1_survivors(db_conn)
+
+        backlog_records = [
+            r for r in caplog.records if "total Pass 2-eligible" in r.message
+        ]
+        assert not backlog_records, "Expected no backlog log when since is omitted"
+
+    def test_no_backlog_log_when_since_matches_all(
+        self, db_conn: sqlite3.Connection, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """No backlog log when since is provided but total == scoped (no exclusions)."""
+        job_id = _insert_job_with_fetched_at(
+            db_conn,
+            fetched_at="2026-03-23 12:00:00",
+            url="https://example.com/nolog-since",
+        )
+        _insert_score(db_conn, job_id, pass_num=PASS_1, overall=75)
+
+        import logging
+
+        with caplog.at_level(logging.INFO, logger="pipeline.src.scorer"):
+            # since is earlier than the job — all eligible jobs pass the filter
+            get_pass1_survivors(db_conn, since="2026-03-23 08:00:00")
+
+        backlog_records = [
+            r for r in caplog.records if "total Pass 2-eligible" in r.message
+        ]
+        assert not backlog_records, (
+            "Expected no backlog log when since does not reduce results"
+        )
+
+
+# ---------------------------------------------------------------------------
+# count_pass2_eligible
+# ---------------------------------------------------------------------------
+
+
+class TestCountPass2Eligible:
+    """Tests for count_pass2_eligible — COUNT(*) equivalent of get_pass1_survivors."""
+
+    def test_returns_zero_when_no_jobs(self, db_conn: sqlite3.Connection) -> None:
+        assert count_pass2_eligible(db_conn) == 0
+
+    def test_returns_zero_when_no_pass1_rows(
+        self, db_conn: sqlite3.Connection
+    ) -> None:
+        _insert_job(db_conn)
+        assert count_pass2_eligible(db_conn) == 0
+
+    def test_matches_len_get_pass1_survivors_no_since(
+        self, db_conn: sqlite3.Connection
+    ) -> None:
+        """count_pass2_eligible() must equal len(get_pass1_survivors()) for same params."""
+        for i in range(5):
+            job_id = _insert_job(db_conn, url=f"https://example.com/count-match/{i}")
+            _insert_score(db_conn, job_id, pass_num=PASS_1, overall=70)
+
+        count = count_pass2_eligible(db_conn)
+        survivors = get_pass1_survivors(db_conn)
+        assert count == len(survivors)
+
+    def test_matches_len_get_pass1_survivors_with_since(
+        self, db_conn: sqlite3.Connection
+    ) -> None:
+        """count_pass2_eligible(since=...) must equal len(get_pass1_survivors(since=...))."""
+        early_id = _insert_job_with_fetched_at(
+            db_conn,
+            fetched_at="2026-03-23 08:00:00",
+            url="https://example.com/count-since-early",
+        )
+        late_id = _insert_job_with_fetched_at(
+            db_conn,
+            fetched_at="2026-03-23 12:00:00",
+            url="https://example.com/count-since-late",
+        )
+        _insert_score(db_conn, early_id, pass_num=PASS_1, overall=80)
+        _insert_score(db_conn, late_id, pass_num=PASS_1, overall=80)
+
+        since = "2026-03-23 10:00:00"
+        count = count_pass2_eligible(db_conn, since=since)
+        survivors = get_pass1_survivors(db_conn, since=since)
+        assert count == len(survivors)
+
+    def test_count_excludes_pass1_failures(
+        self, db_conn: sqlite3.Connection
+    ) -> None:
+        """Jobs with overall=0 (Pass 1 fail) are not counted."""
+        pass_id = _insert_job(db_conn, url="https://example.com/cnt-pass")
+        fail_id = _insert_job(db_conn, url="https://example.com/cnt-fail")
+        _insert_score(db_conn, pass_id, pass_num=PASS_1, overall=70)
+        _insert_score(db_conn, fail_id, pass_num=PASS_1, overall=0)
+
+        assert count_pass2_eligible(db_conn) == 1
+
+    def test_count_excludes_jobs_with_current_pass2_hash(
+        self, db_conn: sqlite3.Connection
+    ) -> None:
+        """Jobs already scored at Pass 2 with the current hash are not counted."""
+        job_id = _insert_job(db_conn, url="https://example.com/cnt-scored")
+        _insert_score(db_conn, job_id, pass_num=PASS_1, overall=80)
+        _insert_score(
+            db_conn, job_id, pass_num=PASS_2, overall=72, profile_hash="current"
+        )
+        assert count_pass2_eligible(db_conn, "current") == 0
+
+    def test_count_includes_stale_pass2_hash(
+        self, db_conn: sqlite3.Connection
+    ) -> None:
+        """Jobs with a stale Pass 2 hash are counted as eligible for re-scoring."""
+        job_id = _insert_job(db_conn, url="https://example.com/cnt-stale")
+        _insert_score(db_conn, job_id, pass_num=PASS_1, overall=80)
+        _insert_score(
+            db_conn, job_id, pass_num=PASS_2, overall=60, profile_hash="oldhash"
+        )
+        assert count_pass2_eligible(db_conn, "newhash") == 1
+
+    def test_count_with_since_matches_get_survivors_with_since_profile_hash(
+        self, db_conn: sqlite3.Connection
+    ) -> None:
+        """count and len match even when both since and current_profile_hash are set."""
+        early_id = _insert_job_with_fetched_at(
+            db_conn,
+            fetched_at="2026-03-23 08:00:00",
+            url="https://example.com/cnt-compose-old",
+        )
+        late_id = _insert_job_with_fetched_at(
+            db_conn,
+            fetched_at="2026-03-23 12:00:00",
+            url="https://example.com/cnt-compose-new",
+        )
+        _insert_score(db_conn, early_id, pass_num=PASS_1, overall=80)
+        _insert_score(
+            db_conn, early_id, pass_num=PASS_2, overall=60, profile_hash="oldhash"
+        )
+        _insert_score(db_conn, late_id, pass_num=PASS_1, overall=80)
+        _insert_score(
+            db_conn, late_id, pass_num=PASS_2, overall=60, profile_hash="oldhash"
+        )
+
+        since = "2026-03-23 10:00:00"
+        hash_ = "newhash"
+        count = count_pass2_eligible(db_conn, hash_, since=since)
+        survivors = get_pass1_survivors(db_conn, hash_, since=since)
+        assert count == len(survivors)
