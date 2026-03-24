@@ -491,6 +491,13 @@ def upsert_pass1_results_from_files(
             )
             continue
 
+        if not isinstance(envelope, dict):
+            logger.warning(
+                "upsert_pass1_results_from_files: skipping non-dict JSON in %s",
+                file_path,
+            )
+            continue
+
         profile_hash: str = envelope.get("profile_hash", "")
         results: list[dict[str, Any]] = envelope.get("results", [])
 
@@ -795,6 +802,13 @@ def upsert_pass2_results_from_files(
                 "upsert_pass2_results_from_files: skipping unreadable file %s: %s",
                 file_path,
                 exc,
+            )
+            continue
+
+        if not isinstance(envelope, dict):
+            logger.warning(
+                "upsert_pass2_results_from_files: skipping non-dict JSON in %s",
+                file_path,
             )
             continue
 
