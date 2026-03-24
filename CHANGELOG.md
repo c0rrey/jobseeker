@@ -1,5 +1,36 @@
 # Changelog
 
+## 2026-03-23 — Session 04278751 (--since time-scoping for fetch-descriptions and scorer)
+
+### Summary
+
+Delivered the complete `--since` time-scoping feature across both pipeline components: `fetch_descriptions` gained a validated `--since` CLI flag and backlog logging; `scorer` gained an equivalent `since` parameter on `get_pass1_survivors` plus a new `count_pass2_eligible` function. Test coverage grew by 26 tests across both test files. A fix cycle addressed 2 P2 review findings (upsert exception scope, inconsistent since normalization); 6 P3 polish items were filed as open crumbs. 9 commits total.
+
+### Implementation (Waves 1–3)
+
+- **seek-220**: feat: add --since CLI arg and time-filter query to fetch-descriptions (`pipeline/scripts/fetch_descriptions.py`) (`40b91f2`)
+- **seek-223**: feat: add since parameter to get_pass1_survivors for time-scoped queries (`pipeline/src/scorer.py`) (`dfc1c7f`)
+- **seek-221**: feat: add dual-count backlog logging to fetch-descriptions when --since is used (`pipeline/scripts/fetch_descriptions.py`) (`418c3a3`)
+- **seek-224**: feat: add count_pass2_eligible and backlog logging to scorer (`pipeline/src/scorer.py`) (`5a0316f`)
+- **seek-222**: feat: add tests for --since filtering and backlog logging in fetch-descriptions (`pipeline/tests/test_fetch_descriptions.py`) (`fcd6fdf`)
+- **seek-225**: feat: add tests for since filtering and backlog counting in scorer (`pipeline/tests/test_scorer_deep.py`) (`351cc82`)
+- docs: update CLAUDE.md for --since flag and count_pass2_eligible (`CLAUDE.md`) (`70b496d`)
+
+### Review Fixes (Round 1 → fix cycle)
+
+- **seek-226**: fix: add isinstance guard for non-dict JSON in upsert functions (`pipeline/src/scorer.py`) (`96d6004`)
+- **seek-228**: fix: normalize and validate since param at all three function boundaries (`pipeline/src/scorer.py`, `pipeline/scripts/fetch_descriptions.py`) (`1e583b1`)
+
+### Review Statistics
+
+| Round | Scope | P1 | P2 | P3 | Verdict |
+|-------|-------|----|----|-----|---------|
+| 1 | 5 files, 6 tasks | 0 | 2 | 6 | PASS WITH ISSUES |
+| 2 | fix commits only | 0 | 0 | 0 | PASS |
+
+8 root causes consolidated. P2s auto-fixed; 6 P3s deferred to open crumbs (seek-227, seek-229, seek-230, seek-231, seek-232, seek-233).
+
+
 ## 2026-03-23 — Session ea99b849 (profile-driven location and comp config)
 
 ### Summary
