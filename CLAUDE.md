@@ -94,7 +94,7 @@ jseeker is a job search automation platform: Python pipeline (fetchers, filters,
 | **fetch** | `python3 -m pipeline.cli --fetch` | Pull from Adzuna, RemoteOK, LinkedIn, ATS feeds, career pages → dedup → insert |
 | **prefilter** | `python3 -m pipeline.cli --prefilter` | Deterministic filters: salary floor, location, seniority, red flags. Writes `pass=0` rejection rows to `score_dimensions` |
 | **Pass 1 scoring** | Manual — spawn parallel agents | Fast filter via LLM. Batches of ~40 jobs. Agents write JSON to `data/pass1_results/`, then upsert sequentially |
-| **fetch-descriptions** | `python3 -m pipeline.scripts.fetch_descriptions --rate-limit 1.5` | Fetch full descriptions for Pass 1 survivors. Use `--rate-limit 1.5` to avoid Adzuna throttling |
+| **fetch-descriptions** | `python3 -m pipeline.scripts.fetch_descriptions --rate-limit 1.5` | Fetch full descriptions for Pass 1 survivors. Use `--rate-limit 1.5` to avoid Adzuna throttling. Optional `--since DATETIME` limits to jobs fetched after the given timestamp |
 | **Pass 2 scoring** | Manual — spawn parallel agents | Deep 5-dimension scoring via LLM. Batches of ~25. Agents write JSON to `data/pass2_results/`, then upsert sequentially |
 | **enrich** | `python3 -m pipeline.cli --enrich` | Glassdoor + levels.fyi + Crunchbase data for companies |
 | **discover** | `python3 -m pipeline.cli --discover` | Find new companies from Pass 1 survivors |
@@ -103,7 +103,7 @@ jseeker is a job search automation platform: Python pipeline (fetchers, filters,
 
 Scoring (Pass 1 and Pass 2) runs via Claude Code subagents, NOT the CLI. The pattern:
 
-1. **Prepare batches**: Use `scorer.get_unscored_jobs()` or `scorer.get_pass1_survivors()` + `scorer.split_into_batches()`
+1. **Prepare batches**: Use `scorer.get_unscored_jobs()` or `scorer.get_pass1_survivors(conn, since=...)` + `scorer.split_into_batches()`. `count_pass2_eligible(conn, since=...)` returns the total count without fetching rows
 2. **Write batch files**: JSON to `/tmp/pass{1,2}_batch_{N}.json`
 3. **Spawn parallel agents**: One per batch, model=sonnet. Each agent reads the batch + profile + prompt template, scores, and calls `write_pass1_results()` / `write_pass2_results()`
 4. **Upsert sequentially**: After ALL agents complete, call `upsert_pass1_results_from_files()` / `upsert_pass2_results_from_files()` once in the main process
@@ -114,10 +114,15 @@ Scoring (Pass 1 and Pass 2) runs via Claude Code subagents, NOT the CLI. The pat
 - **Adzuna `land/ad/` URLs**: These redirect URLs always return 403. The description fetcher skips them automatically. The dedup representative selector prefers jobs with `details/` URLs so the representative can have its description fetched.
 - **Location filter** (`pipeline/src/filter.py:is_allowed_location`): Profile-driven — reads `preferred_locations` from `profile.yaml` and derives the allowlist dynamically (city name, state name/abbreviation, county synonyms). Remote keywords always accepted. To add a new target location, update `preferred_locations` in `profile.yaml` only — no code changes needed.
 - **Adzuna fetcher locations** (`pipeline/src/fetchers/adzuna.py`): Reads `preferred_locations` from `profile.yaml` and builds location queries dynamically. "Remote" entries are skipped (remote jobs captured by city searches). To add a new city, update `preferred_locations` in `profile.yaml` only.
-- **`--fetch-descriptions` not in CLI**: The `--rate-limit` flag is only available via `python3 -m pipeline.scripts.fetch_descriptions`, not `python3 -m pipeline.cli --fetch-descriptions`.
+- **`--fetch-descriptions` not in CLI**: The `--rate-limit` and `--since` flags are only available via `python3 -m pipeline.scripts.fetch_descriptions`, not `python3 -m pipeline.cli --fetch-descriptions`.
 - **Prefilter rejections are sticky**: Jobs rejected by prefilter get a `pass=0, overall=-1` row in `score_dimensions`. If you change filter rules and want jobs re-evaluated, you must DELETE the old rejection rows first, then re-run `--prefilter`.
 - **Dedup representative timing**: Dedup runs during `--fetch` before descriptions are fetched. Representative selection uses URL format (prefers `details/` over `land/ad/`), not `full_description` presence.
 - **react-is**: recharts peer dependency. If `npm install` in `web/` doesn't pull it, run `npm install react-is` manually.
+
+### Timeouts
+
+- `--fetch` and `fetch_descriptions`: use `timeout: 600000` (10m) — fetches routinely take 3–5 minutes
+- Default 2m Bash timeout will cut these off mid-run
 
 ### Webapp
 
