@@ -14,7 +14,11 @@ Pass 1 (fast filter):
 
 Pass 2 (deep analysis):
 - ``get_pass1_survivors``: jobs that passed Pass 1 (overall > 0), including
-  those with a stale Pass 2 profile_hash that need re-scoring.
+  those with a stale Pass 2 profile_hash that need re-scoring.  Emits an
+  INFO log when a ``since`` filter reduces the result set below the total
+  eligible backlog.
+- ``count_pass2_eligible``: COUNT(*) equivalent of ``get_pass1_survivors``;
+  returns an int for backlog visibility without fetching full rows.
 - ``write_pass2_results``: write Pass 2 LLM results to a JSON file.
 - ``upsert_pass2_results_from_files``: read all Pass 2 JSON files and upsert
   into score_dimensions sequentially (no concurrent write contention).
@@ -641,7 +645,84 @@ def get_pass1_survivors(
         params,
     )
     rows = cursor.fetchall()
-    return [dict(row) for row in rows]
+    results = [dict(row) for row in rows]
+
+    if since is not None:
+        total = count_pass2_eligible(db_connection, current_profile_hash)
+        scoped = len(results)
+        if total > scoped:
+            logger.info(
+                "get_pass1_survivors: %d total Pass 2-eligible, %d after since filter",
+                total,
+                scoped,
+            )
+
+    return results
+
+
+def count_pass2_eligible(
+    db_connection: sqlite3.Connection,
+    current_profile_hash: str = "",
+    since: str | None = None,
+) -> int:
+    """Return the count of jobs eligible for Pass 2 deep scoring.
+
+    Executes ``COUNT(*)`` with the identical join and WHERE logic used by
+    :func:`get_pass1_survivors` so that the two functions always agree on
+    which rows qualify.  This allows callers to compare a scoped count
+    (``since`` provided) against the full backlog (``since=None``) without
+    fetching the full result rows.
+
+    A job qualifies when:
+    - It has a Pass 1 row with ``overall > 0`` (fast-filter verdict = YES), AND
+    - It either has no Pass 2 row yet, OR its Pass 2 ``profile_hash`` does not
+      match ``current_profile_hash`` (stale re-scoring).
+
+    Non-representative duplicates are excluded via :data:`_DUP_FILTER`.
+
+    Args:
+        db_connection: Open SQLite connection (WAL mode recommended).
+        current_profile_hash: SHA-256 hex digest of the current combined
+            profile state, as returned by :func:`compute_profile_hash`.
+            Pass an empty string if no profile snapshot exists yet.
+        since: Optional ISO-8601 timestamp string.  When provided, only jobs
+            whose ``fetched_at`` is at or after this timestamp are counted.
+            Both ``'2026-03-23T10:00:00'`` and ``'2026-03-23 10:00:00'`` are
+            accepted; the ``T`` is normalized to a space internally.
+            When ``None`` (the default), no ``fetched_at`` filter is applied.
+
+    Returns:
+        Integer count of Pass 2-eligible jobs matching the given constraints.
+    """
+    since_clause = ""
+    params: dict[str, Any] = {
+        "pass1": PASS_1,
+        "pass2": PASS_2,
+        "current_hash": current_profile_hash,
+    }
+    if since is not None:
+        since_clause = "AND j.fetched_at >= :since"
+        params["since"] = since.replace("T", " ", 1)
+
+    cursor = db_connection.execute(
+        f"""
+        SELECT COUNT(*)
+        FROM jobs j
+        INNER JOIN score_dimensions sd1
+            ON sd1.job_id = j.id AND sd1.pass = :pass1 AND sd1.overall > {PASS_REJECTED}
+        LEFT JOIN score_dimensions sd2
+            ON sd2.job_id = j.id AND sd2.pass = :pass2
+        WHERE (
+            sd2.id IS NULL
+            OR sd2.profile_hash IS NULL
+            OR sd2.profile_hash != :current_hash
+        )
+          {_DUP_FILTER}
+          {since_clause}
+        """,
+        params,
+    )
+    return int(cursor.fetchone()[0])
 
 
 # ---------------------------------------------------------------------------
