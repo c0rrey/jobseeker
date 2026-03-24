@@ -65,6 +65,16 @@ def _get_pass1_survivors_without_description(
     if limit is not None and limit == 0:
         return []
 
+    if since is not None:
+        if not since:
+            since = None
+        else:
+            try:
+                datetime.fromisoformat(since)
+            except ValueError:
+                raise ValueError(f"Invalid since timestamp: {since!r}")
+            since = since.replace("T", " ", 1)
+
     sql = """
         SELECT
             j.id,

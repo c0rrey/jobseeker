@@ -61,6 +61,7 @@ import json
 import logging
 import math
 import sqlite3
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -619,8 +620,16 @@ def get_pass1_survivors(
         "current_hash": current_profile_hash,
     }
     if since is not None:
-        since_clause = "AND j.fetched_at >= :since"
-        params["since"] = since.replace("T", " ", 1)
+        if not since:
+            since = None
+        else:
+            try:
+                datetime.fromisoformat(since)
+            except ValueError:
+                raise ValueError(f"Invalid since timestamp: {since!r}")
+            since = since.replace("T", " ", 1)
+            since_clause = "AND j.fetched_at >= :since"
+            params["since"] = since
 
     cursor = db_connection.execute(
         f"""
@@ -708,8 +717,16 @@ def count_pass2_eligible(
         "current_hash": current_profile_hash,
     }
     if since is not None:
-        since_clause = "AND j.fetched_at >= :since"
-        params["since"] = since.replace("T", " ", 1)
+        if not since:
+            since = None
+        else:
+            try:
+                datetime.fromisoformat(since)
+            except ValueError:
+                raise ValueError(f"Invalid since timestamp: {since!r}")
+            since = since.replace("T", " ", 1)
+            since_clause = "AND j.fetched_at >= :since"
+            params["since"] = since
 
     cursor = db_connection.execute(
         f"""
