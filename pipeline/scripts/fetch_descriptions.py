@@ -144,6 +144,18 @@ def run(
         successful = 0
         failed = 0
 
+        if since is not None:
+            try:
+                all_eligible = _get_pass1_survivors_without_description(conn, since=None)
+            except Exception as exc:
+                logger.error("Failed to query total eligible count: %s", exc)
+                raise RuntimeError(f"Failed to query total eligible count: {exc}") from exc
+            logger.info(
+                "fetch_descriptions: %d total eligible, %d after --since filter",
+                len(all_eligible),
+                total,
+            )
+
         logger.info(
             "fetch_descriptions: total=%d to fetch, rate_limit=%.1fs",
             total,
